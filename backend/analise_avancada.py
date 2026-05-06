@@ -145,11 +145,13 @@ def _resolve_dates(start_date, end_date):
         return d_start, d_end
 
     # Busca a data máxima com uma query leve (1 linha)
+    # Nota: colunas com espaço precisam de aspas duplas no PostgREST
     sb = get_supabase()
+    col = '"Data de Venda"'
     res = (sb.table("transacoes")
-             .select("Data de Venda")
+             .select(col)
              .in_("Status", ["Completo", "Aprovado"])
-             .order("Data de Venda", desc=True)
+             .order(col, desc=True)
              .limit(1)
              .execute())
     if not res.data:

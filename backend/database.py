@@ -35,13 +35,15 @@ def fetch_transacoes_period(start_iso: str, end_iso: str) -> list[dict]:
     """Busca transações de um período específico (ambos inclusive).
 
     start_iso / end_iso: strings ISO 8601, ex: '2026-04-01T00:00:00'
+    Nota: coluna com espaço precisa de aspas duplas no PostgREST.
     """
     sb = get_supabase()
+    col = '"Data de Venda"'
     q = (sb.table("transacoes")
            .select("*")
-           .gte("Data de Venda", start_iso)
-           .lte("Data de Venda", end_iso)
-           .order("Data de Venda"))
+           .gte(col, start_iso)
+           .lte(col, end_iso)
+           .order(col))
     return _paginate(q)
 
 
@@ -52,9 +54,10 @@ def fetch_emails_before(end_iso: str) -> set:
     Busca apenas coluna Email — muito mais leve.
     """
     sb = get_supabase()
+    col = '"Data de Venda"'
     q = (sb.table("transacoes")
            .select("Email")
-           .lt("Data de Venda", end_iso)
+           .lt(col, end_iso)
            .in_("Status", ["Completo", "Aprovado"]))
     rows = _paginate(q)
     return {r["Email"].lower().strip() for r in rows if r.get("Email")}
