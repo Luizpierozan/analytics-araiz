@@ -1,3 +1,19 @@
+// ── Auth: verifica sessão antes de carregar qualquer dado ─────────────────
+async function checkAuth() {
+    try {
+        const res = await fetch('/api/me');
+        if (res.status === 401) { window.location.href = '/login.html'; return null; }
+        const user = await res.json();
+        // Mostra nome do usuário na sidebar
+        document.getElementById('userInfo').innerText = user.name || user.email;
+        // Botão de upload: só superadmin vê
+        if (user.role !== 'superadmin') {
+            document.getElementById('uploadSection').classList.add('hidden');
+        }
+        return user;
+    } catch { window.location.href = '/login.html'; return null; }
+}
+
 const navGeral = document.getElementById('nav-geral');
 const navInad = document.getElementById('nav-inadimplencia');
 const pageGeral = document.getElementById('page-geral');
@@ -392,4 +408,4 @@ const savedTheme = localStorage.getItem('theme');
 if (savedTheme) applyTheme(savedTheme === 'dark');
 
 // Init
-loadAllData();
+checkAuth().then(user => { if (user) loadAllData(); });

@@ -1,9 +1,11 @@
 import pandas as pd
-import sqlite3
 import os
+import math
 from datetime import datetime
+from dotenv import load_dotenv
+from database import get_supabase, fetch_all_transacoes
 
-DB_PATH = 'hotmart_history.db'
+load_dotenv()
 
 def clean_currency(x):
     if pd.isna(x):
@@ -19,43 +21,59 @@ def clean_currency(x):
             return 0.0
     return float(x)
 
-def get_db_connection():
-    if not os.path.exists(DB_PATH):
-        raise Exception("Banco de dados não encontrado. Faça upload de uma planilha primeiro.")
-    return sqlite3.connect(DB_PATH)
+def _clean_val(v):
+    """Sanitiza um valor para JSON/Supabase (remove NaN, inf)."""
+    if v is None:
+        return None
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    if isinstance(v, str) and v in ('NaT', 'nan', 'None', ''):
+        return None
+    return v
 
-def ingest_new_file(filepath):
+def ingest_new_file(filepath, usuario: str = "sistema"):
     try:
         try:
             df_new = pd.read_excel(filepath)
-        except:
+        except Exception:
             df_new = pd.read_html(filepath)[0]
-            
-        conn = get_db_connection()
-        df_old = pd.read_sql("SELECT * FROM transacoes", conn)
-        
-        df_full = pd.concat([df_old, df_new], ignore_index=True)
-        
-        # Limpar E-mails
-        if 'Email' in df_full.columns:
-            df_full['Email'] = df_full['Email'].astype(str).str.lower().str.strip()
 
-        # Datas
-        df_full['Data de Venda'] = pd.to_datetime(df_full['Data de Venda'], dayfirst=True, errors='coerce')
-        df_full = df_full.sort_values('Data de Venda')
+        # Limpar emails
+        if 'Email' in df_new.columns:
+            df_new['Email'] = df_new['Email'].astype(str).str.lower().str.strip()
 
-        # Remover duplicatas
-        if 'Número da Parcela' in df_full.columns:
-            subset = ['Transação', 'Número da Parcela']
-        else:
-            subset = ['Transação', 'Recorrência']
-            
-        df_full = df_full.drop_duplicates(subset=subset, keep='last')
-        df_full['Data de Venda'] = df_full['Data de Venda'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        # Datas para ISO
+        df_new['Data de Venda'] = pd.to_datetime(
+            df_new['Data de Venda'], dayfirst=True, errors='coerce'
+        ).dt.strftime('%Y-%m-%dT%H:%M:%S+00:00')
 
-        df_full.to_sql('transacoes', conn, if_exists='replace', index=False)
-        conn.close()
-        return True
+        if 'Data de Confirmação' in df_new.columns:
+            df_new['Data de Confirmação'] = pd.to_datetime(
+                df_new['Data de Confirmação'], dayfirst=True, errors='coerce'
+            ).dt.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+
+        # Remover duplicatas internas da planilha
+        subset = ['Transação', 'Número da Parcela'] if 'Número da Parcela' in df_new.columns else ['Transação', 'Recorrência']
+        df_new = df_new.drop_duplicates(subset=subset, keep='last')
+
+        sb = get_supabase()
+        rows = df_new.to_dict(orient='records')
+        BATCH = 200
+        total = 0
+        for i in range(0, len(rows), BATCH):
+            batch = [{k: _clean_val(v) for k, v in r.items() if _clean_val(v) is not None}
+                     for r in rows[i:i+BATCH]]
+            sb.table('transacoes').upsert(batch, on_conflict='chave').execute()
+            total += len(batch)
+
+        # Registrar auditoria
+        sb.table('audit_uploads').insert({
+            "usuario": usuario,
+            "arquivo": os.path.basename(filepath),
+            "linhas":  total,
+        }).execute()
+
+        return total
     except Exception as e:
         print(f"Erro na ingestão: {e}")
         return False
@@ -108,11 +126,12 @@ def compute_gross_revenue(row):
     return preco_total
 
 def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
-    conn = get_db_connection()
-    df = pd.read_sql("SELECT * FROM transacoes", conn)
-    conn.close()
-    
-    df['Data de Venda'] = pd.to_datetime(df['Data de Venda'], errors='coerce')
+    rows = fetch_all_transacoes()
+    if not rows:
+        return {"sucesso": False, "erro": "Sem dados. Faça upload de uma planilha primeiro."}
+    df = pd.DataFrame(rows).drop(columns=['id', 'created_at'], errors='ignore')
+
+    df['Data de Venda'] = pd.to_datetime(df['Data de Venda'], errors='coerce', utc=True).dt.tz_localize(None)
     
     # Valores Financeiros (regra oficial em FORMULAS.md — usa Preço Total Convertido
     # ou Preço Total * taxas de câmbio quando moeda != BRL; nunca Preço do Produto direto,
@@ -412,11 +431,12 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
     }
 
 def get_inadimplencia(start_date=None, end_date=None):
-    conn = get_db_connection()
-    df_all = pd.read_sql("SELECT * FROM transacoes", conn)
-    conn.close()
+    rows = fetch_all_transacoes()
+    if not rows:
+        return {"sucesso": False, "erro": "Sem dados"}
+    df_all = pd.DataFrame(rows).drop(columns=['id', 'created_at'], errors='ignore')
 
-    df_all['Data de Venda'] = pd.to_datetime(df_all['Data de Venda'], errors='coerce')
+    df_all['Data de Venda'] = pd.to_datetime(df_all['Data de Venda'], errors='coerce', utc=True).dt.tz_localize(None)
 
     # Inadimplência só existe para assinantes (Código do assinante preenchido)
     # Compras sem código são garantidas pela Hotmart via D+3/D+30

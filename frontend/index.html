@@ -19,10 +19,14 @@
             <a href="#" id="nav-inadimplencia">Inadimplência</a>
         </nav>
         <div class="upload-container">
-            <input type="file" id="fileInput" accept=".xls,.xlsx,.csv" hidden>
-            <button class="btn-upload" id="btnUpload">+ Injetar Planilha</button>
-            <p class="micro-text">O sistema atualizará o histórico.</p>
+            <p class="micro-text" id="userInfo" style="margin-bottom:0.5rem;font-weight:500;color:var(--text-main)"></p>
+            <div id="uploadSection">
+                <input type="file" id="fileInput" accept=".xls,.xlsx,.csv" hidden>
+                <button class="btn-upload" id="btnUpload">+ Injetar Planilha</button>
+                <p class="micro-text">O sistema atualizará o histórico.</p>
+            </div>
             <button class="btn-theme" id="btnTheme">🌙 Tema Escuro</button>
+            <a href="/auth/logout" class="btn-theme" style="display:block;margin-top:0.5rem;text-decoration:none;text-align:center">Sair</a>
         </div>
     </div>
 
