@@ -38,6 +38,9 @@ backend/test_*.py
 # Vercel
 .vercel/
 
+# MCP config (contém referência ao projeto — não sobe)
+.mcp.json
+
 # macOS
 .DS_Store
 .AppleDouble

@@ -2,8 +2,9 @@ import pandas as pd
 import os
 import math
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
-from database import get_supabase, fetch_all_transacoes
+from database import get_supabase, fetch_all_transacoes, fetch_transacoes_period, fetch_emails_before
 
 load_dotenv()
 
@@ -105,12 +106,7 @@ def compute_net_revenue(row):
     return preco_total_convertido
 
 def compute_gross_revenue(row):
-    """Bruto em BRL conforme FORMULAS.md.
-
-    Regra oficial:
-    - moeda != BRL e taxas válidas: Preço Total * Taxa Câmbio Real * Taxa Câmbio do valor recebido
-    - caso contrário: Preço Total Convertido (com fallback para Preço Total se vazio)
-    """
+    """Bruto em BRL conforme FORMULAS.md."""
     moeda = str(row.get('Moeda de recebimento', row.get('Moeda', ''))).upper().strip()
     preco_total = clean_currency(row.get('Preço Total'))
     preco_total_convertido = clean_currency(row.get('Preço Total Convertido'))
@@ -125,81 +121,135 @@ def compute_gross_revenue(row):
         return preco_total_convertido
     return preco_total
 
-def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
-    rows = fetch_all_transacoes()
-    if not rows:
-        return {"sucesso": False, "erro": "Sem dados. Faça upload de uma planilha primeiro."}
-    df = pd.DataFrame(rows).drop(columns=['id', 'created_at'], errors='ignore')
 
+def _rows_to_df(rows: list[dict]) -> pd.DataFrame:
+    """Converte lista de dicts do Supabase em DataFrame com colunas calculadas."""
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows).drop(columns=['id', 'created_at'], errors='ignore')
     df['Data de Venda'] = pd.to_datetime(df['Data de Venda'], errors='coerce', utc=True).dt.tz_localize(None)
-    
-    # Valores Financeiros (regra oficial em FORMULAS.md — usa Preço Total Convertido
-    # ou Preço Total * taxas de câmbio quando moeda != BRL; nunca Preço do Produto direto,
-    # que vem em moeda nativa e gera outliers em vendas USD)
     df['Faturamento_Liquido'] = df.apply(compute_net_revenue, axis=1)
     df['Faturamento_Bruto'] = df.apply(compute_gross_revenue, axis=1)
-    
-    # Filtro de Aprovados
-    df_aprov = df[df['Status'].isin(['Completo', 'Aprovado'])].copy()
-    
-    if df_aprov.empty:
-        return {"erro": "Sem dados aprovados"}
+    return df
 
-    max_date = df_aprov['Data de Venda'].max()
-    min_date = df_aprov['Data de Venda'].min()
 
+def _resolve_dates(start_date, end_date):
+    """Resolve datas do filtro.
+
+    Se não informadas, detecta automaticamente o mês mais recente com dados
+    consultando o banco (só uma linha).
+    """
     if start_date and end_date:
         d_start = pd.to_datetime(start_date)
-        d_end = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    else:
-        # Padrão: Último Mês
-        d_end = max_date
-        d_start = d_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        
-    df_atual = df_aprov[(df_aprov['Data de Venda'] >= d_start) & (df_aprov['Data de Venda'] <= d_end)]
-    if df_atual.empty:
+        d_end   = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        return d_start, d_end
+
+    # Busca a data máxima com uma query leve (1 linha)
+    sb = get_supabase()
+    res = (sb.table("transacoes")
+             .select("Data de Venda")
+             .in_("Status", ["Completo", "Aprovado"])
+             .order("Data de Venda", desc=True)
+             .limit(1)
+             .execute())
+    if not res.data:
+        raise ValueError("Sem dados aprovados no banco")
+    max_date = pd.to_datetime(res.data[0]["Data de Venda"], utc=True).tz_localize(None)
+    d_end   = max_date
+    d_start = d_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return d_start, d_end
+
+
+def _period_iso(d_start, d_end):
+    """Converte timestamps para strings ISO usadas no filtro Supabase."""
+    return d_start.strftime('%Y-%m-%dT%H:%M:%S'), d_end.strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def _compute_period_metrics(df_aprov: pd.DataFrame):
+    vendas_df = df_aprov[(df_aprov['Recorrência'] == 1) | (df_aprov['Recorrência'].isna())]
+    return {
+        "liq":    df_aprov['Faturamento_Liquido'].sum(),
+        "bruto":  df_aprov['Faturamento_Bruto'].sum(),
+        "vendas": len(vendas_df)
+    }
+
+
+def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
+    try:
+        d_start, d_end = _resolve_dates(start_date, end_date)
+    except ValueError as e:
+        return {"sucesso": False, "erro": str(e)}
+
+    # ── 1-3. Todas as queries em paralelo ──────────────────────────────────────
+    s_iso, e_iso = _period_iso(d_start, d_end)
+    delta_days = (d_end - d_start).days + 1
+
+    mom_start = d_start - pd.Timedelta(days=delta_days)
+    mom_end   = d_start - pd.Timedelta(seconds=1)
+    yoy_start = d_start - pd.DateOffset(years=1)
+    yoy_end   = d_end   - pd.DateOffset(years=1)
+    avg1_start = d_start - pd.DateOffset(years=1)
+    avg1_end   = d_end   - pd.DateOffset(years=1)
+    avg2_start = d_start - pd.DateOffset(years=2)
+    avg2_end   = d_end   - pd.DateOffset(years=2)
+
+    def _fetch(label, *args):
+        if label == 'emails':
+            return label, fetch_emails_before(args[0])
+        return label, fetch_transacoes_period(args[0], args[1])
+
+    tasks = {
+        'atual':  (s_iso, e_iso),
+        'mom':    _period_iso(mom_start, mom_end),
+        'yoy':    _period_iso(yoy_start, yoy_end),
+        'avg1':   _period_iso(avg1_start, avg1_end),
+        'avg2':   _period_iso(avg2_start, avg2_end),
+        'emails': (s_iso,),
+    }
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {
+            pool.submit(_fetch, label, *args): label
+            for label, args in tasks.items()
+        }
+        for future in as_completed(futures):
+            label, data = future.result()
+            results[label] = data
+
+    rows_atual = results['atual']
+    if not rows_atual:
         return {"erro": "Sem dados para o período selecionado"}
 
-    # Vendas = primeira cobrança: Recorrência == 1 (1ª mensalidade de assinatura)
-    # ou Recorrência vazia (compra avulsa/parcelada, independente do Número da Parcela)
-    def compute_period_metrics(period_df):
-        vendas_df = period_df[(period_df['Recorrência'] == 1) | (period_df['Recorrência'].isna())]
-        return {
-            "liq": period_df['Faturamento_Liquido'].sum(),
-            "bruto": period_df['Faturamento_Bruto'].sum(),
-            "vendas": len(vendas_df)
-        }
+    df_atual_all = _rows_to_df(rows_atual)
+    df_atual     = df_atual_all[df_atual_all['Status'].isin(['Completo', 'Aprovado'])].copy()
+    df_mom       = _rows_to_df([r for r in results['mom']  if r.get('Status') in ('Completo', 'Aprovado')])
+    df_yoy       = _rows_to_df([r for r in results['yoy']  if r.get('Status') in ('Completo', 'Aprovado')])
+    avg_dfs      = [
+        _rows_to_df([r for r in results['avg1'] if r.get('Status') in ('Completo', 'Aprovado')]),
+        _rows_to_df([r for r in results['avg2'] if r.get('Status') in ('Completo', 'Aprovado')]),
+    ]
+    emails_antes = results['emails']
 
-    atual_metrics = compute_period_metrics(df_atual)
-    fat_liq_atual = atual_metrics["liq"]
+    # ── 4. Métricas do período atual ──
+    if df_atual.empty:
+        return {"erro": "Sem dados aprovados no período"}
+
+    atual_metrics = _compute_period_metrics(df_atual)
+    fat_liq_atual   = atual_metrics["liq"]
     fat_bruto_atual = atual_metrics["bruto"]
     vol_vendas_atual = atual_metrics["vendas"]
 
-    # Comparativos
-    delta_days = (d_end - d_start).days + 1
-    mom_start = d_start - pd.Timedelta(days=delta_days)
-    mom_end = d_start - pd.Timedelta(seconds=1)
-    df_mom = df_aprov[(df_aprov['Data de Venda'] >= mom_start) & (df_aprov['Data de Venda'] <= mom_end)]
-    mom_metrics = compute_period_metrics(df_mom) if not df_mom.empty else {"liq": 0, "bruto": 0, "vendas": 0}
+    # ── 5. Comparativos ──
+    mom_metrics = _compute_period_metrics(df_mom) if not df_mom.empty else {"liq": 0, "bruto": 0, "vendas": 0}
+    yoy_metrics = _compute_period_metrics(df_yoy) if not df_yoy.empty else {"liq": 0, "bruto": 0, "vendas": 0}
 
-    yoy_start = d_start - pd.DateOffset(years=1)
-    yoy_end = d_end - pd.DateOffset(years=1)
-    df_yoy = df_aprov[(df_aprov['Data de Venda'] >= yoy_start) & (df_aprov['Data de Venda'] <= yoy_end)]
-    yoy_metrics = compute_period_metrics(df_yoy) if not df_yoy.empty else {"liq": 0, "bruto": 0, "vendas": 0}
-
-    avg_metrics_list = []
-    for years_back in [1, 2]:
-        avg_start = d_start - pd.DateOffset(years=years_back)
-        avg_end = d_end - pd.DateOffset(years=years_back)
-        df_avg_part = df_aprov[(df_aprov['Data de Venda'] >= avg_start) & (df_aprov['Data de Venda'] <= avg_end)]
-        if not df_avg_part.empty:
-            avg_metrics_list.append(compute_period_metrics(df_avg_part))
-
-    if avg_metrics_list:
+    if avg_dfs and any(not d.empty for d in avg_dfs):
+        non_empty = [_compute_period_metrics(d) for d in avg_dfs if not d.empty]
         avg_metrics = {
-            "liq": sum(m["liq"] for m in avg_metrics_list) / len(avg_metrics_list),
-            "bruto": sum(m["bruto"] for m in avg_metrics_list) / len(avg_metrics_list),
-            "vendas": sum(m["vendas"] for m in avg_metrics_list) / len(avg_metrics_list),
+            "liq":    sum(m["liq"]    for m in non_empty) / len(non_empty),
+            "bruto":  sum(m["bruto"]  for m in non_empty) / len(non_empty),
+            "vendas": sum(m["vendas"] for m in non_empty) / len(non_empty),
         }
     else:
         avg_metrics = {"liq": 0, "bruto": 0, "vendas": 0}
@@ -215,52 +265,50 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
         ref_metrics = mom_metrics
         comparativo_label = "Período anterior equivalente"
 
-    mom_liq = format_percentage(fat_liq_atual, ref_metrics["liq"])
-    mom_bruto = format_percentage(fat_bruto_atual, ref_metrics["bruto"])
-    mom_vol = format_percentage(vol_vendas_atual, ref_metrics["vendas"])
-    
-    # Origem de Receita (Novos vs Renovações vs Mentoria vs Experience)
+    mom_liq   = format_percentage(fat_liq_atual,    ref_metrics["liq"])
+    mom_bruto = format_percentage(fat_bruto_atual,  ref_metrics["bruto"])
+    mom_vol   = format_percentage(vol_vendas_atual, ref_metrics["vendas"])
+
+    # ── 6. Segmentação de receita ──
     seg_keys = ["Novas", "Renovacoes", "Ingressos", "Mentoria"]
     receita_segmentada = {k: {"valor": 0.0, "volume": 0, "qtd_itens": 0} for k in seg_keys}
+    emails_vis = set(emails_antes)  # cópia local mutável
 
-    emails_antes = set(df_aprov[df_aprov['Data de Venda'] < d_start]['Email'].dropna())
-
-    for idx, row in df_atual.iterrows():
-        prod = str(row.get('Nome do Produto', '')).lower()
-        val = row['Faturamento_Liquido']
-        email = str(row.get('Email', ''))
+    for _, row in df_atual.iterrows():
+        prod  = str(row.get('Nome do Produto', '')).lower()
+        val   = row['Faturamento_Liquido']
+        email = str(row.get('Email', '')).lower().strip()
         itens = int(float(row.get('Quantidade de itens', 0) or 0))
 
         if 'mentoria' in prod or 'r100' in prod:
             seg = "Mentoria"
         elif 'experience' in prod:
             seg = "Ingressos"
-        elif email in emails_antes:
+        elif email in emails_vis:
             seg = "Renovacoes"
         else:
             seg = "Novas"
-            emails_antes.add(email)
+            emails_vis.add(email)
 
-        receita_segmentada[seg]["valor"] += val
-        receita_segmentada[seg]["volume"] += 1
+        receita_segmentada[seg]["valor"]     += val
+        receita_segmentada[seg]["volume"]    += 1
         receita_segmentada[seg]["qtd_itens"] += itens
 
-    # Por produto — faturamento líquido (para gráfico de barras horizontal)
+    # ── 7. Por produto ──
     por_produto = (
         df_atual.groupby('Nome do Produto')['Faturamento_Liquido']
-        .sum().sort_values(ascending=False)
-        .round(2).to_dict()
+        .sum().sort_values(ascending=False).round(2).to_dict()
     )
 
-    # Evolução temporal (para gráfico de linha adaptativo)
-    delta_days = (d_end - d_start).days + 1
+    # ── 8. Evolução temporal ──
     if delta_days <= 35:
         df_atual = df_atual.copy()
         df_atual['_periodo'] = df_atual['Data de Venda'].dt.strftime('%d/%m')
         periodo_tipo = 'dia'
     elif delta_days <= 120:
         df_atual = df_atual.copy()
-        df_atual['_periodo'] = df_atual['Data de Venda'].dt.to_period('W').apply(lambda p: p.start_time.strftime('%d/%m'))
+        df_atual['_periodo'] = df_atual['Data de Venda'].dt.to_period('W').apply(
+            lambda p: p.start_time.strftime('%d/%m'))
         periodo_tipo = 'semana'
     else:
         df_atual = df_atual.copy()
@@ -276,71 +324,74 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
 
     evolucao_raw = {}
     for _, row in grp.iterrows():
-        p = row['_periodo']
+        p    = row['_periodo']
         prod = row['Nome do Produto']
         if p not in evolucao_raw:
             evolucao_raw[p] = {}
         evolucao_raw[p][prod] = {"fat": round(float(row['faturamento']), 2), "qtd": int(row['qtd_itens'])}
 
-    # Ordenar períodos cronologicamente
-    periodos_ordenados = sorted(evolucao_raw.keys(),
-        key=lambda x: pd.to_datetime(x, dayfirst=True, errors='coerce') or pd.Timestamp.min)
+    periodos_ordenados = sorted(
+        evolucao_raw.keys(),
+        key=lambda x: pd.to_datetime(x, dayfirst=True, errors='coerce') or pd.Timestamp.min
+    )
     evolucao = {"periodos": periodos_ordenados, "tipo": periodo_tipo, "dados": evolucao_raw}
 
-    # Time Comercial
+    # ── 9. Time Comercial ──
     vendedores = {
         'ards-luc': 'Lucas',
         'ards-van': 'Vanessa',
         'ards-isa': 'Isaac',
         'ards-ali': 'Aline'
     }
-    
+
     comercial = []
-    if 'Origem de Checkout' in df.columns:
+    df_atual_all_aprov = df_atual_all[df_atual_all['Status'].isin(['Completo', 'Aprovado'])]
+    df_atual_all_atras = df_atual_all[df_atual_all['Status'] == 'Atrasado']
+
+    if 'Origem de Checkout' in df_atual_all.columns:
         for cod, nome in vendedores.items():
-            # Total vendido
-            df_vend_aprov = df_atual[df_atual['Origem de Checkout'].astype(str).str.contains(cod, case=False, na=False)]
+            mask = df_atual_all_aprov['Origem de Checkout'].astype(str).str.contains(cod, case=False, na=False)
+            df_vend_aprov = df_atual_all_aprov[mask]
             vendido = df_vend_aprov['Faturamento_Liquido'].sum()
 
-            # Total Atrasado por esse vendedor no periodo atual
-            df_vend_atrasado = df[(df['Data de Venda'] >= d_start) & (df['Data de Venda'] <= d_end) & (df['Status'] == 'Atrasado') & (df['Origem de Checkout'].astype(str).str.contains(cod, case=False, na=False))]
-            atrasado = df_vend_atrasado['Faturamento_Liquido'].sum()
+            mask_atr = df_atual_all_atras['Origem de Checkout'].astype(str).str.contains(cod, case=False, na=False)
+            atrasado = df_atual_all_atras[mask_atr]['Faturamento_Liquido'].sum()
 
             taxa_inad = (atrasado / (vendido + atrasado)) * 100 if (vendido + atrasado) > 0 else 0
 
-            # Volume de vendas = apenas primeira compra (Recorrência==1 ou NaN), excluindo recorrências ativas
-            df_vend_vendas = df_vend_aprov[(df_vend_aprov['Recorrência'].isna()) | (df_vend_aprov['Recorrência'] == 1)]
+            df_vend_vendas = df_vend_aprov[
+                (df_vend_aprov['Recorrência'].isna()) | (df_vend_aprov['Recorrência'] == 1)
+            ]
             volume_vendas = len(df_vend_vendas)
-            qtd_itens = int(df_vend_vendas['Quantidade de itens'].fillna(0).astype(float).sum()) if 'Quantidade de itens' in df_vend_vendas.columns else 0
+            qtd_itens = int(
+                df_vend_vendas['Quantidade de itens'].fillna(0).astype(float).sum()
+            ) if 'Quantidade de itens' in df_vend_vendas.columns else 0
 
             comercial.append({
-                "nome": nome,
-                "vendido": float(vendido),
+                "nome":              nome,
+                "vendido":           float(vendido),
                 "inadimplencia_perc": float(taxa_inad),
-                "volume_vendas": volume_vendas,
-                "qtd_itens": qtd_itens
+                "volume_vendas":     volume_vendas,
+                "qtd_itens":         qtd_itens
             })
-            
+
     comercial.sort(key=lambda x: x['vendido'], reverse=True)
 
-    # ── Novos cards ────────────────────────────────────────────────────────────
+    # ── 10. Cards adicionais ──
     LIMIAR_RENOVACAO = 4200.0
+    df_vendas = df_atual[
+        (df_atual['Recorrência'].isna()) | (df_atual['Recorrência'] == 1)
+    ]
 
-    # Vendas do período (Recorrência == 1 ou NaN)
-    df_vendas = df_atual[(df_atual['Recorrência'].isna()) | (df_atual['Recorrência'] == 1)]
+    qtd_itens_total = int(
+        df_vendas['Quantidade de itens'].fillna(0).astype(float).sum()
+    ) if 'Quantidade de itens' in df_vendas.columns else 0
 
-    # Quantidade de itens vendidos
-    qtd_itens_total = int(df_vendas['Quantidade de itens'].fillna(0).astype(float).sum()) if 'Quantidade de itens' in df_vendas.columns else 0
-
-    # Curso Padrão vs Renovação (A Raiz da Solução, pelo valor líquido)
-    raiz = df_vendas[df_vendas['Nome do Produto'] == 'A Raiz da Solução']
-    curso_padrao_liq   = float(raiz[raiz['Faturamento_Liquido'] > LIMIAR_RENOVACAO]['Faturamento_Liquido'].sum())
+    raiz             = df_vendas[df_vendas['Nome do Produto'] == 'A Raiz da Solução']
+    curso_padrao_liq  = float(raiz[raiz['Faturamento_Liquido'] >  LIMIAR_RENOVACAO]['Faturamento_Liquido'].sum())
     curso_renovacao_liq = float(raiz[raiz['Faturamento_Liquido'] <= LIMIAR_RENOVACAO]['Faturamento_Liquido'].sum())
+    outros_liq        = float(df_vendas[df_vendas['Nome do Produto'] != 'A Raiz da Solução']['Faturamento_Liquido'].sum())
 
-    # Outros — Venda (demais produtos, exceto A Raiz da Solução)
-    outros_liq = float(df_vendas[df_vendas['Nome do Produto'] != 'A Raiz da Solução']['Faturamento_Liquido'].sum())
-
-    # Assinaturas Ativas (Recorrência >= 2, com Código do assinante)
     df_assin_col = 'Código do assinante'
     assinaturas_ativas = int(df_atual[
         (df_atual['Recorrência'] >= 2) &
@@ -348,31 +399,34 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
         (df_atual[df_assin_col] != '')
     ]['Código do assinante'].nunique()) if df_assin_col in df_atual.columns else 0
 
-    # Cancelados: total bruto + sem conversão (perda real)
-    df_periodo_todos = df[(df['Data de Venda'] >= d_start) & (df['Data de Venda'] <= d_end)]
-    df_cancel = df_periodo_todos[df_periodo_todos['Status'] == 'Cancelado']
+    df_cancel = df_atual_all[df_atual_all['Status'] == 'Cancelado']
     cancelados_total = int(len(df_cancel))
     emails_cancel = set(df_cancel['Email'].dropna().str.lower().str.strip().unique())
     emails_convertidos = set(
-        df_periodo_todos[
-            df_periodo_todos['Status'].isin(['Completo', 'Aprovado']) &
-            df_periodo_todos['Email'].str.lower().str.strip().isin(emails_cancel)
+        df_atual_all[
+            df_atual_all['Status'].isin(['Completo', 'Aprovado']) &
+            df_atual_all['Email'].str.lower().str.strip().isin(emails_cancel)
         ]['Email'].str.lower().str.strip().unique()
     ) if emails_cancel else set()
     cancelados_sem_conversao = int(len(emails_cancel - emails_convertidos))
 
-    # Inadimplentes do período (visão executiva — baseado no período filtrado)
+    # Inadimplentes do período
     inad_exec = {"total": 0, "valor": 0.0}
-    if df_assin_col in df.columns:
-        df_assin_periodo = df_periodo_todos[df_periodo_todos[df_assin_col].notna() & (df_periodo_todos[df_assin_col] != '')]
+    if df_assin_col in df_atual_all.columns:
+        df_assin_periodo = df_atual_all[
+            df_atual_all[df_assin_col].notna() & (df_atual_all[df_assin_col] != '')
+        ]
         cods_inad = set(df_assin_periodo[df_assin_periodo['Status'] == 'Atrasado'][df_assin_col].unique())
         inad_exec["total"] = int(len(cods_inad))
         valor_inad = 0.0
         for cod in cods_inad:
-            atrasadas = df_assin_periodo[(df_assin_periodo[df_assin_col] == cod) & (df_assin_periodo['Status'] == 'Atrasado')]
+            atrasadas = df_assin_periodo[
+                (df_assin_periodo[df_assin_col] == cod) &
+                (df_assin_periodo['Status'] == 'Atrasado')
+            ]
             if atrasadas.empty:
                 continue
-            ref = atrasadas.iloc[0]
+            ref   = atrasadas.iloc[0]
             preco = clean_currency(ref.get('Preço Total', 0))
             moeda = str(ref.get('Moeda de recebimento', 'BRL')).upper().strip()
             if moeda not in ('BRL', 'REAL BRASILEIRO', ''):
@@ -387,84 +441,74 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
         "sucesso": True,
         "periodo_atual": f"{d_start.strftime('%d/%m/%Y')} a {d_end.strftime('%d/%m/%Y')}",
         "resumo": {
-            "faturamento_liquido": float(fat_liq_atual),
-            "mom_liquido": float(mom_liq),
-            "faturamento_bruto": float(fat_bruto_atual),
-            "mom_bruto": float(mom_bruto),
-            "vendas": int(vol_vendas_atual),
-            "mom_vendas": float(mom_vol),
-            "qtd_itens": qtd_itens_total,
-            "curso_padrao": curso_padrao_liq,
-            "curso_padrao_volume": int(len(raiz[raiz['Faturamento_Liquido'] > LIMIAR_RENOVACAO])),
-            "curso_renovacao": curso_renovacao_liq,
-            "curso_renovacao_volume": int(len(raiz[raiz['Faturamento_Liquido'] <= LIMIAR_RENOVACAO])),
-            "outros_venda": outros_liq,
-            "assinaturas_ativas": assinaturas_ativas,
-            "cancelados_total": cancelados_total,
+            "faturamento_liquido":     float(fat_liq_atual),
+            "mom_liquido":             float(mom_liq),
+            "faturamento_bruto":       float(fat_bruto_atual),
+            "mom_bruto":               float(mom_bruto),
+            "vendas":                  int(vol_vendas_atual),
+            "mom_vendas":              float(mom_vol),
+            "qtd_itens":               qtd_itens_total,
+            "curso_padrao":            curso_padrao_liq,
+            "curso_padrao_volume":     int(len(raiz[raiz['Faturamento_Liquido'] >  LIMIAR_RENOVACAO])),
+            "curso_renovacao":         curso_renovacao_liq,
+            "curso_renovacao_volume":  int(len(raiz[raiz['Faturamento_Liquido'] <= LIMIAR_RENOVACAO])),
+            "outros_venda":            outros_liq,
+            "assinaturas_ativas":      assinaturas_ativas,
+            "cancelados_total":        cancelados_total,
             "cancelados_sem_conversao": cancelados_sem_conversao,
-            "inadimplentes": inad_exec["total"],
-            "valor_inadimplente": inad_exec["valor"]
+            "inadimplentes":           inad_exec["total"],
+            "valor_inadimplente":      inad_exec["valor"]
         },
-        "benchmark": selected,
+        "benchmark":         selected,
         "comparativo_label": comparativo_label,
         "comparativos": {
             "mom": {
-                "liquido": float(format_percentage(fat_liq_atual, mom_metrics["liq"])),
-                "bruto": float(format_percentage(fat_bruto_atual, mom_metrics["bruto"])),
-                "vendas": float(format_percentage(vol_vendas_atual, mom_metrics["vendas"]))
+                "liquido": float(format_percentage(fat_liq_atual,    mom_metrics["liq"])),
+                "bruto":   float(format_percentage(fat_bruto_atual,  mom_metrics["bruto"])),
+                "vendas":  float(format_percentage(vol_vendas_atual, mom_metrics["vendas"]))
             },
             "yoy": {
-                "liquido": float(format_percentage(fat_liq_atual, yoy_metrics["liq"])),
-                "bruto": float(format_percentage(fat_bruto_atual, yoy_metrics["bruto"])),
-                "vendas": float(format_percentage(vol_vendas_atual, yoy_metrics["vendas"]))
+                "liquido": float(format_percentage(fat_liq_atual,    yoy_metrics["liq"])),
+                "bruto":   float(format_percentage(fat_bruto_atual,  yoy_metrics["bruto"])),
+                "vendas":  float(format_percentage(vol_vendas_atual, yoy_metrics["vendas"]))
             },
             "avg": {
-                "liquido": float(format_percentage(fat_liq_atual, avg_metrics["liq"])),
-                "bruto": float(format_percentage(fat_bruto_atual, avg_metrics["bruto"])),
-                "vendas": float(format_percentage(vol_vendas_atual, avg_metrics["vendas"]))
+                "liquido": float(format_percentage(fat_liq_atual,    avg_metrics["liq"])),
+                "bruto":   float(format_percentage(fat_bruto_atual,  avg_metrics["bruto"])),
+                "vendas":  float(format_percentage(vol_vendas_atual, avg_metrics["vendas"]))
             }
         },
-        "segmentacao": {k: {"valor": round(v["valor"], 2), "volume": v["volume"], "qtd_itens": v["qtd_itens"]} for k, v in receita_segmentada.items()},
+        "segmentacao": {
+            k: {"valor": round(v["valor"], 2), "volume": v["volume"], "qtd_itens": v["qtd_itens"]}
+            for k, v in receita_segmentada.items()
+        },
         "por_produto": por_produto,
-        "evolucao": evolucao,
-        "comercial": comercial
+        "evolucao":    evolucao,
+        "comercial":   comercial
     }
 
+
 def get_inadimplencia(start_date=None, end_date=None):
-    rows = fetch_all_transacoes()
+    try:
+        d_start, d_end = _resolve_dates(start_date, end_date)
+    except ValueError as e:
+        return {"sucesso": False, "erro": str(e)}
+
+    s_iso, e_iso = _period_iso(d_start, d_end)
+    rows = fetch_transacoes_period(s_iso, e_iso)
     if not rows:
         return {"sucesso": False, "erro": "Sem dados"}
-    df_all = pd.DataFrame(rows).drop(columns=['id', 'created_at'], errors='ignore')
 
-    df_all['Data de Venda'] = pd.to_datetime(df_all['Data de Venda'], errors='coerce', utc=True).dt.tz_localize(None)
+    df_all = _rows_to_df(rows)
 
     # Inadimplência só existe para assinantes (Código do assinante preenchido)
-    # Compras sem código são garantidas pela Hotmart via D+3/D+30
     df_assin = df_all[df_all['Código do assinante'].notna() & (df_all['Código do assinante'] != '')].copy()
 
-    # Período filtrado — identifica quais assinantes tiveram movimento no período
-    if start_date and end_date:
-        d_start = pd.to_datetime(start_date, errors='coerce')
-        d_end = pd.to_datetime(end_date, errors='coerce') + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    else:
-        ativos = df_assin[df_assin['Status'].isin(['Completo', 'Aprovado'])]
-        max_date = ativos['Data de Venda'].max()
-        d_end = max_date
-        d_start = d_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-    df_periodo = df_assin[
-        (df_assin['Data de Venda'] >= d_start) &
-        (df_assin['Data de Venda'] <= d_end)
-    ]
-
-    # Assinantes ativos no período = tiveram Aprovado ou Completo no período
     assinantes_ativos = set(
-        df_periodo[df_periodo['Status'].isin(['Completo', 'Aprovado'])]['Código do assinante'].unique()
+        df_assin[df_assin['Status'].isin(['Completo', 'Aprovado'])]['Código do assinante'].unique()
     )
-
-    # Inadimplentes do período = assinantes com pelo menos uma Recorrência Atrasada no período
     inad_periodo = set(
-        df_periodo[df_periodo['Status'] == 'Atrasado']['Código do assinante'].unique()
+        df_assin[df_assin['Status'] == 'Atrasado']['Código do assinante'].unique()
     )
 
     hoje = datetime.now()
@@ -472,13 +516,11 @@ def get_inadimplencia(start_date=None, end_date=None):
     lista_devedores = []
 
     for cod in inad_periodo:
-        # Histórico completo do assinante para calcular valor total devido
-        hist = df_assin[df_assin['Código do assinante'] == cod]
+        hist      = df_assin[df_assin['Código do assinante'] == cod]
         atrasadas = hist[hist['Status'] == 'Atrasado']
         qtd_atrasadas = len(atrasadas)
 
-        # Preço unitário (Preço Total de uma recorrência, com conversão BRL)
-        ref_row = atrasadas.iloc[0]
+        ref_row       = atrasadas.iloc[0]
         preco_unitario = clean_currency(ref_row.get('Preço Total', 0))
         moeda = str(ref_row.get('Moeda de recebimento', 'BRL')).upper().strip()
         if moeda not in ('BRL', 'REAL BRASILEIRO', ''):
@@ -487,41 +529,39 @@ def get_inadimplencia(start_date=None, end_date=None):
             if tcr > 0 and tcv > 0:
                 preco_unitario = preco_unitario * tcr * tcv
 
-        valor_devido = preco_unitario * qtd_atrasadas
-
-        # Aging baseado na data da parcela atrasada mais antiga
+        valor_devido    = preco_unitario * qtd_atrasadas
         data_mais_antiga = atrasadas['Data de Venda'].min()
         dias = (hoje - data_mais_antiga).days if pd.notna(data_mais_antiga) else 0
 
-        if dias <= 30: aging["0-30"] += 1
+        if   dias <= 30: aging["0-30"]  += 1
         elif dias <= 60: aging["31-60"] += 1
         elif dias <= 90: aging["61-90"] += 1
-        else: aging["90+"] += 1
+        else:            aging["90+"]   += 1
 
         nome_row = hist.iloc[-1]
         lista_devedores.append({
-            "nome": str(nome_row.get('Nome', 'Desconhecido')),
-            "email": str(nome_row.get('Email', '')),
-            "telefone": str(nome_row.get('Telefone', '')),
-            "produto": str(nome_row.get('Nome do Produto', '')),
-            "codigo_assinante": str(cod),
+            "nome":               str(nome_row.get('Nome', 'Desconhecido')),
+            "email":              str(nome_row.get('Email', '')),
+            "telefone":           str(nome_row.get('Telefone', '')),
+            "produto":            str(nome_row.get('Nome do Produto', '')),
+            "codigo_assinante":   str(cod),
             "parcelas_atrasadas": int(qtd_atrasadas),
-            "valor": float(valor_devido),
-            "dias": int(dias),
+            "valor":              float(valor_devido),
+            "dias":               int(dias),
             "data": data_mais_antiga.strftime('%d/%m/%Y') if pd.notna(data_mais_antiga) else ''
         })
 
     lista_devedores.sort(key=lambda x: x['dias'], reverse=True)
 
     total_ativos = len(assinantes_ativos | inad_periodo)
-    total_inad = len(inad_periodo)
+    total_inad   = len(inad_periodo)
     taxa = (total_inad / total_ativos * 100) if total_ativos > 0 else 0
 
     return {
         "sucesso": True,
         "geral": {
             "total_inadimplentes": int(total_inad),
-            "taxa_inadimplencia": float(taxa)
+            "taxa_inadimplencia":  float(taxa)
         },
         "aging": aging,
         "lista": lista_devedores[:100]
