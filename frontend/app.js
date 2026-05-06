@@ -97,9 +97,8 @@ btnAtual.addEventListener('click', () => {
 });
 
 btnHistorico.addEventListener('click', () => {
-    // 2024 to today
     const d = new Date();
-    const start = '2024-01-01';
+    const start = '2022-01-01';
     const end = d.toISOString().split('T')[0];
     dateStart.value = start; dateEnd.value = end;
     loadAllData(start, end);
