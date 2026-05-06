@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hotmart Sênior Analytics</title>
+    <link rel="stylesheet" href="index.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo">
+            <h2>Analytics</h2>
+            <span class="badge">Sênior</span>
+        </div>
+        <nav>
+            <a href="#" id="nav-geral" class="active">Visão Executiva</a>
+            <a href="#" id="nav-inadimplencia">Inadimplência</a>
+        </nav>
+        <div class="upload-container">
+            <input type="file" id="fileInput" accept=".xls,.xlsx,.csv" hidden>
+            <button class="btn-upload" id="btnUpload">+ Injetar Planilha</button>
+            <p class="micro-text">O sistema atualizará o histórico.</p>
+            <button class="btn-theme" id="btnTheme">🌙 Tema Escuro</button>
+        </div>
+    </div>
+
+    <main class="content">
+        <div id="loading" class="hidden">Sincronizando Banco de Dados...</div>
+        
+        <!-- PAGE 1: Visão Executiva -->
+        <div id="page-geral" class="page">
+            <header class="exec-header">
+                <div class="exec-title">
+                    <h1>Visão Executiva</h1>
+                    <p id="refMes">Período: Carregando...</p>
+                </div>
+                <div class="exec-controls">
+                    <div class="filter-row">
+                        <button id="btnAtual" class="btn-outline">Mês Atual</button>
+                        <button id="btn3Meses" class="btn-outline">Últimos 3 Meses</button>
+                        <button id="btnAno" class="btn-outline">Este Ano</button>
+                        <button id="btnHistorico" class="btn-outline">Todo o Histórico</button>
+                        <input type="date" id="dateStart" class="modern-input">
+                        <span style="color:#9CA3AF">até</span>
+                        <input type="date" id="dateEnd" class="modern-input">
+                        <button id="btnFiltrar" class="btn-primary">Ir</button>
+                    </div>
+                    <div class="filter-row" style="margin-top:6px">
+                        <label style="font-size:12px;color:#6B7280;margin-right:6px">Comparar com:</label>
+                        <select id="selectBenchmark" class="modern-input" style="width:auto;padding:4px 8px">
+                            <option value="mom">Período Anterior</option>
+                            <option value="yoy">Mesmo Mês Ano Anterior</option>
+                            <option value="avg">Média Histórica</option>
+                        </select>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Linha 1: Financeiro principal -->
+            <div class="cards">
+                <div class="card">
+                    <h3>Faturamento Líquido</h3>
+                    <p id="valFatLiq" class="val">R$ 0,00</p>
+                    <p id="momFatLiq" class="mom">—</p>
+                </div>
+                <div class="card">
+                    <h3>Faturamento Bruto</h3>
+                    <p id="valFatBruto" class="val">R$ 0,00</p>
+                    <p id="momFatBruto" class="mom">—</p>
+                </div>
+                <div class="card">
+                    <h3>Volume de Vendas</h3>
+                    <p id="valVendas" class="val">0</p>
+                    <p id="momVendas" class="mom">—</p>
+                </div>
+                <div class="card">
+                    <h3>Qtd. Itens Vendidos</h3>
+                    <p id="valQtdItens" class="val">0</p>
+                </div>
+            </div>
+
+            <!-- Linha 2: Breakdown de vendas -->
+            <div class="cards">
+                <div class="card">
+                    <h3>Curso Padrão</h3>
+                    <p id="valCursoPadrao" class="val">R$ 0,00</p>
+                    <p id="lblCursoPadrao" class="mom card-label">A Raiz da Solução</p>
+                </div>
+                <div class="card">
+                    <h3>Curso Renovação</h3>
+                    <p id="valCursoRenovacao" class="val">R$ 0,00</p>
+                    <p id="lblCursoRenovacao" class="mom card-label">A Raiz da Solução</p>
+                </div>
+                <div class="card">
+                    <h3>Outros — Venda</h3>
+                    <p id="valOutrosVenda" class="val">R$ 0,00</p>
+                    <p class="mom card-label">Demais produtos</p>
+                </div>
+                <div class="card">
+                    <h3>Assinaturas Ativas</h3>
+                    <p id="valAssinaturasAtivas" class="val">0</p>
+                </div>
+            </div>
+
+            <!-- Linha 3: Risco e cancelamento -->
+            <div class="cards">
+                <div class="card card-alert">
+                    <h3>Inadimplentes</h3>
+                    <p id="valInadimplentes" class="val">0</p>
+                    <p class="mom card-label">Assinantes com atraso no período</p>
+                </div>
+                <div class="card card-alert">
+                    <h3>Valor Inadimplente</h3>
+                    <p id="valValorInadimplente" class="val">R$ 0,00</p>
+                    <p class="mom card-label">Parcelas atrasadas no período</p>
+                </div>
+                <div class="card">
+                    <h3>Cancelados</h3>
+                    <p id="valCancelados" class="val">0</p>
+                    <p id="valCanceladosSemConv" class="mom card-label">—</p>
+                </div>
+            </div>
+
+            <!-- Gráficos linha 1: pizza (menor) + tabela (menor) -->
+            <div class="charts-row charts-row-compact">
+                <div class="chart-container chart-sm">
+                    <h3>Origem da Receita</h3>
+                    <canvas id="receitaChart"></canvas>
+                </div>
+                <div class="chart-container leaderboard chart-sm">
+                    <h3>Performance Comercial</h3>
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th>Vendedor</th>
+                                <th>Vendido</th>
+                                <th>Vol.</th>
+                                <th>Itens</th>
+                                <th>Inad.</th>
+                            </tr>
+                        </thead>
+                        <tbody id="comercialTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Gráfico 2: Faturamento por produto (barras horizontais) -->
+            <div class="chart-container chart-full">
+                <h3>Faturamento Líquido por Produto</h3>
+                <canvas id="produtoChart"></canvas>
+            </div>
+
+            <!-- Gráfico 3: Evolução temporal (linha adaptativa) -->
+            <div class="chart-container chart-full">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <h3>Evolução no Período</h3>
+                    <div>
+                        <label style="font-size:12px;color:#6B7280;margin-right:4px">Ver:</label>
+                        <select id="selectEvolucaoMetrica" class="modern-input" style="width:auto;padding:4px 8px;font-size:12px">
+                            <option value="fat">Faturamento Líquido</option>
+                            <option value="qtd">Qtd. Itens Vendidos</option>
+                        </select>
+                    </div>
+                </div>
+                <canvas id="evolucaoChart"></canvas>
+            </div>
+        </div>
+
+        <!-- PAGE 2: Inadimplência -->
+        <div id="page-inadimplencia" class="page hidden">
+            <header>
+                <h1>Central de Risco</h1>
+                <p>Gestão de cobrança e envelhecimento da dívida.</p>
+            </header>
+
+            <div class="cards">
+                <div class="card danger">
+                    <h3>Devedores Ativos</h3>
+                    <p id="valDevedores" class="val">0</p>
+                </div>
+                <div class="card danger">
+                    <h3>Taxa de Inadimplência</h3>
+                    <p id="valTaxaInad" class="val">0%</p>
+                </div>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>Aging (Idade da Dívida)</h3>
+                    <canvas id="agingChart"></canvas>
+                </div>
+            </div>
+
+            <div class="table-container mt-2">
+                <h3>Lista de Cobrança</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Dias</th>
+                            <th>Cliente</th>
+                            <th>Contato</th>
+                            <th>Produto</th>
+                            <th>Valor</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devedoresTbody">
+                        <!-- Populated via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

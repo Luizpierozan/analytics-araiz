@@ -1,0 +1,48 @@
+# Ambiente virtual
+venv/
+.venv/
+env/
+
+# Banco de dados (dados locais — não sobe para o repositório)
+*.db
+*.sqlite
+*.sqlite3
+
+# Planilhas com dados de clientes (sensível)
+*.xls
+*.xlsx
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Scripts de debug e testes temporários
+backend/analise.py
+backend/compare_inad.py
+backend/debug_col.py
+backend/explore_history.py
+backend/mock_sales.xls
+backend/test*.py
+backend/test_*.py
+
+# Variáveis de ambiente (NUNCA sobe ao GitHub)
+.env
+.env.local
+.env.production
+*.env
+
+# Vercel
+.vercel/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+logs/
