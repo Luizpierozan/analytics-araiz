@@ -21,6 +21,16 @@ const pageInad = document.getElementById('page-inadimplencia');
 const fileInput = document.getElementById('fileInput');
 const btnUpload = document.getElementById('btnUpload');
 const loading = document.getElementById('loading');
+const loadingLabel = document.getElementById('loadingLabel');
+
+function showLoading(msg = 'Carregando') {
+    loadingLabel.innerText = msg;
+    loading.classList.remove('hidden', 'fading');
+}
+function hideLoading() {
+    loading.classList.add('fading');
+    setTimeout(() => loading.classList.add('hidden'), 420);
+}
 
 let receitaChart = null;
 let agingChart = null;
@@ -43,17 +53,16 @@ navInad.addEventListener('click', (e) => {
 btnUpload.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', async (e) => {
     if (!e.target.files.length) return;
-    loading.classList.remove('hidden');
-    loading.innerText = 'Sincronizando Banco de Dados...';
-    
+    showLoading('Sincronizando banco de dados');
+
     const formData = new FormData();
     formData.append('file', e.target.files[0]);
-    
+
     try {
         const res = await fetch('/api/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if(data.sucesso) {
-            loading.innerText = 'Atualizando Métricas...';
+            showLoading('Atualizando métricas');
             await loadAllData();
         } else {
             alert('Erro: ' + data.erro);
@@ -61,7 +70,7 @@ fileInput.addEventListener('change', async (e) => {
     } catch(err) {
         alert('Erro de conexão');
     } finally {
-        loading.classList.add('hidden');
+        hideLoading();
     }
 });
 
@@ -136,13 +145,14 @@ function formatMom(val, el, label = 'Período Anterior') {
 }
 
 async function loadAllData(start = '', end = '') {
+    showLoading('Carregando');
     try {
         let urlDash = '/api/dashboard';
         let urlInad = '/api/inadimplencia';
         if(start && end) urlDash += `?start=${start}&end=${end}&benchmark=${currentBenchmark}`;
         else urlDash += `?benchmark=${currentBenchmark}`;
         if(start && end) urlInad += `?start=${start}&end=${end}`;
-        
+
         const [resDash, resInad] = await Promise.all([
             fetch(urlDash),
             fetch(urlInad)
@@ -154,6 +164,8 @@ async function loadAllData(start = '', end = '') {
         if(dataInad.sucesso) renderInadimplencia(dataInad);
     } catch(err) {
         console.error("Failed to load data", err);
+    } finally {
+        hideLoading();
     }
 }
 
