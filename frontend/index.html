@@ -17,6 +17,7 @@
         <nav>
             <a href="#" id="nav-geral" class="active">Visão Executiva</a>
             <a href="#" id="nav-inadimplencia">Inadimplência</a>
+            <a href="#" id="nav-projecoes">Projeções</a>
         </nav>
         <div class="upload-container">
             <p class="micro-text" id="userInfo" style="margin-bottom:0.5rem;font-weight:500;color:var(--text-main)"></p>
@@ -176,6 +177,144 @@
                     </div>
                 </div>
                 <canvas id="evolucaoChart"></canvas>
+            </div>
+        </div>
+
+        <!-- PAGE 3: Projeções -->
+        <div id="page-projecoes" class="page hidden">
+            <header>
+                <h1>Projeções</h1>
+                <p>Análise de retenção, MRR e receita contratada com base no histórico real.</p>
+            </header>
+
+            <!-- Termômetro de Meta -->
+            <div class="termometro-container" id="termometroBox">
+                <div class="termometro-header">
+                    <div>
+                        <h3 class="termometro-titulo">⚠️ Piso de Sobrevivência — R$ 6.500.000</h3>
+                        <p id="termometroDesc" class="termometro-desc">Calculando...</p>
+                    </div>
+                    <div class="termometro-pct" id="termometroPct">—</div>
+                </div>
+                <div class="termometro-track">
+                    <div class="termometro-fill" id="termometroFill" style="width:0%"></div>
+                    <div class="termometro-segmentos">
+                        <span style="left:40%"></span>
+                        <span style="left:70%"></span>
+                    </div>
+                </div>
+                <div class="termometro-labels">
+                    <span id="termometroContratada">Contratada: —</span>
+                    <span id="termometroTurmas">Turmas: —</span>
+                    <span id="termometroGap">Gap: —</span>
+                </div>
+            </div>
+
+            <!-- KPIs -->
+            <div class="cards">
+                <div class="card">
+                    <h3>MRR Atual</h3>
+                    <p id="valMRR" class="val">R$ 0</p>
+                    <p class="mom card-label">Receita mensal recorrente ativa</p>
+                </div>
+                <div class="card">
+                    <h3>Receita Contratada (12m)</h3>
+                    <p id="valContratada" class="val">R$ 0</p>
+                    <p class="mom card-label">Cenário realista — assinantes ativos</p>
+                </div>
+                <div class="card">
+                    <h3>Assinantes Ativos</h3>
+                    <p id="valAtivos" class="val">0</p>
+                    <p class="mom card-label">Pagaram nos últimos 60 dias</p>
+                </div>
+                <div class="card">
+                    <h3>Taxa de Renovação</h3>
+                    <p id="valRenovacao" class="val">0%</p>
+                    <p id="lblRenovacao" class="mom card-label">dos alunos elegíveis voltaram</p>
+                </div>
+            </div>
+
+            <!-- Curva de Sobrevivência -->
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>Curva de Retenção por Posição no Ciclo</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                        % dos assinantes que ainda estão pagando em cada mês do ciclo de 12 meses
+                    </p>
+                    <canvas id="survivalChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Sazonalidade Histórica do Faturamento</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                        % médio que cada mês representa do faturamento anual — base 2023–2025. Meses de turma destacados em laranja.
+                    </p>
+                    <canvas id="sazonalidadeChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Projeção de Receita -->
+            <div class="chart-container chart-full">
+                <h3>Projeção de Faturamento 2026 — Sazonalidade Histórica</h3>
+                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                    Barras sólidas = realizado. Barras semitransparentes = projeção estatística baseada na distribuição histórica de 2023–2025.
+                    ⚠️ Não inclui efeitos de turma, crescimento orgânico ou variações extraordinárias — use como referência de tendência.
+                </p>
+                <canvas id="projecaoChart"></canvas>
+            </div>
+
+            <!-- Projeção T9 e T10 -->
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>T9 — Turma Ímpar (mai/2026)</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">
+                        Baseado em R$ <span id="t9Pre"></span> acumulados em jan–abr/26 × ratio histórico das turmas ímpares
+                    </p>
+                    <div id="t9Cards" class="cards" style="margin-bottom:0"></div>
+                </div>
+                <div class="chart-container">
+                    <h3>T10 — Turma Par (set/2026)</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">
+                        Estimada como % histórica de T9 (proporção par/ímpar das turmas anteriores)
+                    </p>
+                    <div id="t10Cards" class="cards" style="margin-bottom:0"></div>
+                </div>
+            </div>
+
+            <!-- Histórico de Turmas -->
+            <div class="table-container mt-2">
+                <h3>Histórico de Turmas</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Turma</th>
+                            <th>Abertura</th>
+                            <th>Tipo</th>
+                            <th>Receita no mês</th>
+                            <th>Pré-4m</th>
+                            <th>Ratio</th>
+                        </tr>
+                    </thead>
+                    <tbody id="turmasTbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Tabela de Cohorts por Turma -->
+            <div class="table-container mt-2">
+                <h3>Retenção por Turma de Entrada</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Turma</th>
+                            <th>Abertura</th>
+                            <th>Entraram</th>
+                            <th>Assinantes</th>
+                            <th>Assinantes Ativos</th>
+                            <th>Retenção mês 6</th>
+                            <th>Receita Gerada</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cohortsTbody"></tbody>
+                </table>
             </div>
         </div>
 

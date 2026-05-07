@@ -1,4 +1,5 @@
 from supabase import create_client, Client
+import pandas as pd
 import os
 
 def get_supabase() -> Client:
@@ -45,6 +46,84 @@ def fetch_transacoes_period(start_iso: str, end_iso: str) -> list[dict]:
            .lte(col, end_iso)
            .order(col))
     return _paginate(q)
+
+
+def fetch_assinantes() -> list[dict]:
+    """Busca todas as linhas de assinantes (Código do assinante preenchido).
+
+    Exclui produtos Experience (ingressos de evento — não são assinaturas recorrentes).
+    Inclui Email para permitir correspondência com matrículas email-based (cohort por turma).
+    """
+    sb = get_supabase()
+    cols = ",".join([
+        '"Código do assinante"',
+        '"Email"',
+        '"Nome do Produto"',
+        '"Recorrência"',
+        '"Status"',
+        '"Data de Venda"',
+        '"Preço Total"',
+        '"Preço Total Convertido"',
+        '"Moeda de recebimento"',
+        '"Taxa de Câmbio Real"',
+        '"Taxa de Câmbio do valor recebido"',
+        '"Faturamento líquido"',
+        '"Valor que você recebeu convertido"',
+    ])
+    q = (sb.table("transacoes")
+           .select(cols)
+           .not_.is_('"Código do assinante"', 'null')
+           .not_.ilike('"Nome do Produto"', '%experience%'))
+    return _paginate(q)
+
+
+def fetch_approved_since(year: int = 2023) -> list[dict]:
+    """Busca todas as transações aprovadas a partir de um ano, com colunas de receita e data.
+
+    Usado para análise histórica de faturamento mensal e projeções de turma.
+    """
+    sb = get_supabase()
+    cols = ",".join([
+        '"Data de Venda"', '"Nome do Produto"', '"Status"', '"Recorrência"',
+        '"Faturamento líquido"', '"Preço Total Convertido"', '"Preço Total"',
+        '"Moeda de recebimento"', '"Taxa de Câmbio Real"',
+        '"Taxa de Câmbio do valor recebido"', '"Valor que você recebeu convertido"',
+    ])
+    start = f"{year}-01-01T00:00:00"
+    end   = pd.Timestamp.now().strftime('%Y-%m-%dT%H:%M:%S')
+    q = (sb.table("transacoes")
+           .select(cols)
+           .in_("Status", ["Completo", "Aprovado"])
+           .gte('"Data de Venda"', start)
+           .lte('"Data de Venda"', end))
+    return _paginate(q)
+
+
+def fetch_raiz_enrollments() -> list[dict]:
+    """Busca todas as matrículas de 'A Raiz da Solução' (Recorrência 1 ou NaN).
+
+    Usado para calcular taxa de renovação por email + limiar de preço.
+    Retorna apenas colunas necessárias para essa análise.
+    """
+    sb = get_supabase()
+    cols = '"Email","Nome do Produto","Recorrência","Status","Data de Venda","Preço Total Convertido","Faturamento líquido","Moeda de recebimento","Taxa de Câmbio Real","Taxa de Câmbio do valor recebido","Valor que você recebeu convertido"'
+
+    # Recorrência == 1: primeiro pagamento de cada ciclo
+    q1 = (sb.table("transacoes")
+            .select(cols)
+            .ilike('"Nome do Produto"', '%raiz%')
+            .eq('"Recorrência"', 1)
+            .in_("Status", ["Completo", "Aprovado"]))
+
+    # Recorrência nula: compras avulsas (parceladas sem assinatura formal)
+    q2 = (sb.table("transacoes")
+            .select(cols)
+            .ilike('"Nome do Produto"', '%raiz%')
+            .is_('"Recorrência"', 'null')
+            .in_("Status", ["Completo", "Aprovado"]))
+
+    rows = _paginate(q1) + _paginate(q2)
+    return rows
 
 
 def fetch_emails_before(end_iso: str) -> set:

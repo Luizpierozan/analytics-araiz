@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from auth import router as auth_router, get_current_user, require_superadmin
 from analise_avancada import ingest_new_file, get_dashboard_geral, get_inadimplencia
+from projecoes import get_projecoes, invalidate_cache
 from dotenv import load_dotenv
 import os, tempfile
 
@@ -51,6 +52,7 @@ async def upload_file(
         os.unlink(tmp_path)
 
         if linhas is not False:
+            invalidate_cache()  # força recálculo das projeções
             return {"sucesso": True, "linhas": linhas}
         else:
             return JSONResponse({"sucesso": False, "erro": "Erro ao processar arquivo"}, status_code=500)
@@ -66,6 +68,11 @@ async def dashboard(
     user: dict = Depends(get_current_user),     # qualquer usuário autenticado
 ):
     return get_dashboard_geral(start_date=start, end_date=end, benchmark=benchmark)
+
+
+@app.get("/api/projecoes")
+async def projecoes(user: dict = Depends(get_current_user)):
+    return get_projecoes()
 
 
 @app.get("/api/inadimplencia")

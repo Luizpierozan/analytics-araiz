@@ -37,7 +37,17 @@ def decode_session_token(token: str) -> dict:
     except JWTError:
         raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
 
+_DEV_USER = {
+    "email":   "dev@local",
+    "name":    "Dev Local",
+    "picture": "",
+    "role":    "superadmin",
+}
+
 def get_current_user(request: Request) -> dict:
+    # Em desenvolvimento, bypass total de autenticação
+    if not IS_PROD:
+        return _DEV_USER
     token = request.cookies.get("session")
     if not token:
         raise HTTPException(status_code=401, detail="Não autenticado")

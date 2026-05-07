@@ -146,6 +146,37 @@ header p { color: var(--text-muted); font-size: 1rem; }
 [data-theme="dark"] .badge-danger { background: #450A0A; color: #FCA5A5; }
 .mt-2 { margin-top: 2rem; }
 
+/* ── Termômetro de Meta ──────────────────────────────────────────────────── */
+.termometro-container {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 1.5rem 2rem; margin-bottom: 2rem;
+    box-shadow: 0 1px 3px var(--shadow);
+}
+.termometro-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
+.termometro-titulo { font-size: 1rem; font-weight: 600; color: var(--text-main); }
+.termometro-desc   { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }
+.termometro-pct    { font-size: 2.5rem; font-weight: 800; line-height: 1; color: var(--text-main); }
+
+.termometro-track {
+    position: relative; height: 18px; background: var(--bg-color);
+    border-radius: 999px; overflow: hidden; margin-bottom: 0.6rem;
+}
+.termometro-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #3B82F6, #10B981);
+    transition: width 1s cubic-bezier(.4,0,.2,1), background 0.5s;
+}
+.termometro-segmentos { position: absolute; inset: 0; pointer-events: none; }
+.termometro-segmentos span {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: var(--surface); opacity: 0.6;
+}
+
+.termometro-labels {
+    display: flex; gap: 2rem; font-size: 0.78rem; color: var(--text-muted);
+}
+.termometro-labels span strong { color: var(--text-main); }
+
 /* Theme toggle button */
 .btn-theme { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.85rem; transition: 0.2s; width: 100%; margin-top: 0.75rem; }
 .btn-theme:hover { border-color: var(--secondary); color: var(--secondary); }

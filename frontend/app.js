@@ -14,13 +14,15 @@ async function checkAuth() {
     } catch { window.location.href = '/login.html'; return null; }
 }
 
-const navGeral = document.getElementById('nav-geral');
-const navInad = document.getElementById('nav-inadimplencia');
-const pageGeral = document.getElementById('page-geral');
-const pageInad = document.getElementById('page-inadimplencia');
-const fileInput = document.getElementById('fileInput');
-const btnUpload = document.getElementById('btnUpload');
-const loading = document.getElementById('loading');
+const navGeral    = document.getElementById('nav-geral');
+const navInad     = document.getElementById('nav-inadimplencia');
+const navProj     = document.getElementById('nav-projecoes');
+const pageGeral   = document.getElementById('page-geral');
+const pageInad    = document.getElementById('page-inadimplencia');
+const pageProj    = document.getElementById('page-projecoes');
+const fileInput   = document.getElementById('fileInput');
+const btnUpload   = document.getElementById('btnUpload');
+const loading     = document.getElementById('loading');
 const loadingLabel = document.getElementById('loadingLabel');
 
 function showLoading(msg = 'Carregando') {
@@ -32,21 +34,43 @@ function hideLoading() {
     setTimeout(() => loading.classList.add('hidden'), 420);
 }
 
-let receitaChart = null;
-let agingChart = null;
-let produtoChart = null;
-let evolucaoChart = null;
+let receitaChart     = null;
+let agingChart       = null;
+let produtoChart     = null;
+let evolucaoChart    = null;
+let survivalChart      = null;
+let projecaoChart      = null;
+let sazonalidadeChart  = null;
+
+let projecoesLoaded = false;  // carrega só quando a aba for aberta pela primeira vez
+
+function showPage(page) {
+    [pageGeral, pageInad, pageProj].forEach(p => p.classList.add('hidden'));
+    [navGeral, navInad, navProj].forEach(n => n.classList.remove('active'));
+    page.classList.remove('hidden');
+}
 
 // Routing
 navGeral.addEventListener('click', (e) => {
     e.preventDefault();
-    navGeral.classList.add('active'); navInad.classList.remove('active');
-    pageGeral.classList.remove('hidden'); pageInad.classList.add('hidden');
+    showPage(pageGeral); navGeral.classList.add('active');
 });
 navInad.addEventListener('click', (e) => {
     e.preventDefault();
-    navInad.classList.add('active'); navGeral.classList.remove('active');
-    pageInad.classList.remove('hidden'); pageGeral.classList.add('hidden');
+    showPage(pageInad); navInad.classList.add('active');
+});
+navProj.addEventListener('click', async (e) => {
+    e.preventDefault();
+    showPage(pageProj); navProj.classList.add('active');
+    if (!projecoesLoaded) {
+        showLoading('Calculando projeções');
+        try {
+            const res  = await fetch('/api/projecoes');
+            const data = await res.json();
+            if (data.sucesso) { renderProjecoes(data); projecoesLoaded = true; }
+        } catch(err) { console.error('Erro projeções', err); }
+        finally { hideLoading(); }
+    }
 });
 
 // Upload
@@ -401,6 +425,289 @@ function renderInadimplencia(data) {
             <td>${formatCurrency(d.valor)}</td>
         </tr>`;
     });
+}
+
+// ── Projeções ────────────────────────────────────────────────────────────────
+function renderProjecoes(data) {
+    const cc = chartColors();
+
+    // ── Termômetro ──
+    const t = data.termometro;
+    const fill   = document.getElementById('termometroFill');
+    const pctEl  = document.getElementById('termometroPct');
+    const descEl = document.getElementById('termometroDesc');
+    const statusEmoji = t.status === 'saudavel' ? '🟢' : t.status === 'atencao' ? '🟡' : '🔴';
+
+    pctEl.innerText  = t.percentual + '%';
+    pctEl.style.color = t.cor;
+
+    const statusLabel = {
+        saudavel: 'Empresa segura',
+        atencao:  'Atenção — abaixo do necessário',
+        critico:  'Risco de sobrevivência',
+    }[t.status];
+    descEl.innerText = `${statusEmoji} ${statusLabel} — Projeção de ${formatCurrency(t.total_projetado)} dos ${formatCurrency(t.meta_anual)} necessários para os próximos 12 meses`;
+
+    // Anima o fill com delay para o CSS transition funcionar
+    setTimeout(() => {
+        fill.style.width = t.percentual + '%';
+        if (t.status === 'critico')  fill.style.background = 'linear-gradient(90deg,#EF4444,#F97316)';
+        if (t.status === 'atencao')  fill.style.background = 'linear-gradient(90deg,#3B82F6,#F59E0B)';
+        if (t.status === 'saudavel') fill.style.background = 'linear-gradient(90deg,#3B82F6,#10B981)';
+    }, 100);
+
+    document.getElementById('termometroContratada').innerHTML =
+        `Contratada: <strong>${formatCurrency(t.receita_contratada)}</strong>`;
+    document.getElementById('termometroTurmas').innerHTML =
+        `Turmas esperadas: <strong>${formatCurrency(t.receita_turmas)}</strong>`;
+    document.getElementById('termometroGap').innerHTML =
+        t.gap > 0
+        ? `Falta para sobreviver: <strong style="color:var(--danger)">${formatCurrency(t.gap)}</strong>`
+        : `<strong style="color:var(--success)">✓ Piso atingido</strong>`;
+
+    // KPIs
+    document.getElementById('valMRR').innerText        = formatCurrency(data.mrr_atual);
+    document.getElementById('valContratada').innerText = formatCurrency(data.receita_contratada);
+    document.getElementById('valAtivos').innerText     = data.total_ativos;
+    document.getElementById('valRenovacao').innerText  = data.renewal.taxa + '%';
+    document.getElementById('lblRenovacao').innerText  =
+        `${data.renewal.renovaram} de ${data.renewal.total_elegivel} elegíveis (critério: email + preço)`;
+
+    // ── Curva de Sobrevivência ──
+    const survLabels = Object.keys(data.survival).map(k => `Mês ${k}`);
+    const survValues = Object.values(data.survival).map(v => v ? +(v * 100).toFixed(1) : null);
+
+    if (survivalChart) survivalChart.destroy();
+    survivalChart = new Chart(document.getElementById('survivalChart'), {
+        type: 'line',
+        data: {
+            labels: survLabels,
+            datasets: [{
+                label: '% Retidos',
+                data: survValues,
+                borderColor: '#3B82F6',
+                backgroundColor: 'rgba(59,130,246,0.12)',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 5,
+                pointBackgroundColor: '#3B82F6',
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: cc.grid }, ticks: { color: cc.text } },
+                y: {
+                    grid: { color: cc.grid }, ticks: { color: cc.text, callback: v => v + '%' },
+                    min: 0, max: 100
+                }
+            }
+        }
+    });
+
+    // ── Sazonalidade Histórica ──
+    // Meses típicos de turma recebem cor âmbar para destacar o padrão
+    const TURMA_MONTHS = [4, 5, 9, 10]; // abr, mai, set, out
+    const sazonPct = data.proj_2026.pct_historica;  // array[12] em %
+    const sazonBg  = sazonPct.map((_, i) =>
+        TURMA_MONTHS.includes(i + 1)
+            ? 'rgba(245,158,11,0.80)'   // âmbar — mês típico de turma
+            : 'rgba(37,99,235,0.70)'    // azul  — mês recorrente
+    );
+    if (sazonalidadeChart) sazonalidadeChart.destroy();
+    sazonalidadeChart = new Chart(document.getElementById('sazonalidadeChart'), {
+        type: 'bar',
+        data: {
+            labels: data.proj_2026.labels,
+            datasets: [{
+                label: '% do faturamento anual',
+                data: sazonPct,
+                backgroundColor: sazonBg,
+                borderRadius: 6,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.raw.toFixed(1)}% do ano`
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { color: cc.grid }, ticks: { color: cc.text } },
+                y: {
+                    grid: { color: cc.grid },
+                    ticks: { color: cc.text, callback: v => v + '%' },
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // ── Projeção 2026 por Sazonalidade ──
+    const p26 = data.proj_2026;
+    const proj2026Subtitle = `Jan–${['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][p26.meses_realizados]} realizados = ${formatCurrency(p26.total_realizado)} `
+        + `(${p26.peso_realizado_pct}% do ano historicamente) → projeção total 2026: ${formatCurrency(p26.total_projetado_ano)}`;
+
+    if (projecaoChart) projecaoChart.destroy();
+    projecaoChart = new Chart(document.getElementById('projecaoChart'), {
+        type: 'bar',
+        data: {
+            labels: p26.labels,
+            datasets: [
+                {
+                    label: 'Realizado',
+                    data: p26.realizado,
+                    backgroundColor: 'rgba(37,99,235,0.85)',
+                    borderRadius: 6,
+                    order: 1,
+                },
+                {
+                    label: 'Projeção por Sazonalidade',
+                    data: p26.projetado,
+                    backgroundColor: 'rgba(37,99,235,0.28)',
+                    borderColor: 'rgba(37,99,235,0.55)',
+                    borderWidth: 1,
+                    borderRadius: 6,
+                    order: 2,
+                },
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: cc.text } },
+                tooltip: {
+                    callbacks: {
+                        title: items => `${items[0].label}/2026`,
+                        label: ctx => {
+                            if (ctx.raw == null) return null;
+                            const tag = ctx.datasetIndex === 1 ? ' (estimado)' : ' (realizado)';
+                            return ` ${ctx.dataset.label}: ${formatCurrency(ctx.raw)}${tag}`;
+                        },
+                        afterBody: ([item]) => {
+                            const pct = p26.pct_historica[item.dataIndex];
+                            return [`Peso histórico: ${pct}% do faturamento anual`];
+                        }
+                    }
+                },
+                subtitle: {
+                    display: true,
+                    text: proj2026Subtitle,
+                    color: cc.text,
+                    font: { size: 11 },
+                    padding: { bottom: 8 }
+                }
+            },
+            scales: {
+                x: { grid: { color: cc.grid }, ticks: { color: cc.text } },
+                y: {
+                    grid: { color: cc.grid },
+                    ticks: { color: cc.text, callback: v => 'R$ ' + (v / 1000).toFixed(0) + 'k' },
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // ── Tabela de Cohorts por Turma ──
+    const cohortsTbody = document.getElementById('cohortsTbody');
+    cohortsTbody.innerHTML = '';
+    const cohortData = (data.cohorts_turma || []).slice().reverse(); // mais recente primeiro
+    cohortData.forEach(c => {
+        const ret = c.retencao_6;
+        const retCell = ret != null
+            ? `<span style="color:${ret >= 60 ? 'var(--success)' : ret >= 40 ? 'var(--text-main)' : 'var(--danger)'};font-weight:600">${ret}%</span>`
+            : `<span style="color:var(--text-muted);font-size:0.8rem">Aguardando</span>`;
+
+        // % de entrantes que viraram assinantes
+        const assinPct = c.total > 0 ? ((c.assinantes / c.total) * 100).toFixed(0) : 0;
+        // % de assinantes que ainda estão ativos
+        const ativosPct = c.assinantes > 0 ? ((c.ativos / c.assinantes) * 100).toFixed(0) : 0;
+
+        // Alunos sem assinatura formal (pagamento à vista ou dados parciais)
+        const semAssin = c.total - c.assinantes;
+        const entramTooltip = semAssin > 0
+            ? `title="${c.assinantes} assinantes + ${semAssin} sem código de assinante"`
+            : '';
+
+        cohortsTbody.innerHTML += `<tr>
+            <td><strong>${c.nome}</strong></td>
+            <td>${c.abertura}</td>
+            <td ${entramTooltip}>${c.total}${semAssin > 0 ? ` <span style="font-size:0.72rem;color:var(--text-muted)">(+${semAssin} s/ assin.)</span>` : ''}</td>
+            <td>${c.assinantes} <span style="font-size:0.75rem;color:var(--text-muted)">(${assinPct}%)</span></td>
+            <td>${c.ativos} <span style="font-size:0.75rem;color:var(--text-muted)">(${ativosPct}%)</span></td>
+            <td>${retCell}</td>
+            <td>${formatCurrency(c.receita_total)}</td>
+        </tr>`;
+    });
+
+    // ── Projeções T9 / T10 ────────────────────────────────────────────────────
+    const pt = data.proj_turmas || {};
+    const t9 = pt.t9 || {};
+    const t10 = pt.t10 || {};
+
+    // Atualiza o span com o valor pré-4m real de T9
+    const t9PreEl = document.getElementById('t9Pre');
+    if (t9PreEl && t9.pre_4m_real != null) {
+        t9PreEl.innerText = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(t9.pre_4m_real);
+    }
+
+    function renderScenarioCards(containerId, scenarios) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        el.innerHTML = '';
+        const items = [
+            { key: 'conservador', label: 'Conservador', color: 'var(--text-muted)', bg: '' },
+            { key: 'realista',    label: 'Realista',    color: 'var(--secondary)',   bg: '' },
+            { key: 'otimista',    label: 'Otimista',    color: 'var(--success)',     bg: '' },
+        ];
+        items.forEach(({ key, label, color }) => {
+            const val = scenarios[key];
+            if (val == null) return;
+            el.innerHTML += `
+                <div class="card">
+                    <h3>${label}</h3>
+                    <p class="val" style="color:${color};font-size:1.4rem">${formatCurrency(val)}</p>
+                </div>`;
+        });
+    }
+
+    renderScenarioCards('t9Cards', t9);
+    renderScenarioCards('t10Cards', t10);
+
+    // ── Tabela Histórico de Turmas ────────────────────────────────────────────
+    const turmasTbody = document.getElementById('turmasTbody');
+    if (turmasTbody) {
+        turmasTbody.innerHTML = '';
+        const hist = data.historico_turmas || [];
+        hist.forEach(tm => {
+            const isFuturo = tm.status === 'futuro';
+            const ratioFmt = tm.ratio != null ? tm.ratio.toFixed(2) + 'x' : isFuturo ? '<em style="color:var(--secondary)">projetado</em>' : '—';
+            const pre4mFmt = tm.pre_4m != null ? formatCurrency(tm.pre_4m) : isFuturo ? formatCurrency(data.proj_turmas?.t9?.pre_4m_real ?? 0) : '—';
+            const receitaFmt = tm.receita != null ? formatCurrency(tm.receita) : isFuturo ? '<em style="color:var(--text-muted)">Não realizado</em>' : '—';
+            const tipoBadge = tm.tipo === 'impar'
+                ? `<span style="background:#EEF2FF;color:#4338CA;padding:2px 8px;border-radius:999px;font-size:0.75rem;font-weight:600">Ímpar</span>`
+                : `<span style="background:#F0FDF4;color:#166534;padding:2px 8px;border-radius:999px;font-size:0.75rem;font-weight:600">Par</span>`;
+            const rowStyle = isFuturo ? 'opacity:0.65;font-style:italic' : '';
+            turmasTbody.innerHTML += `<tr style="${rowStyle}">
+                <td><strong>T${tm.id}</strong>${isFuturo ? ' <span style="font-size:0.7rem;color:var(--secondary);font-style:normal;font-weight:600">PROJETADA</span>' : ''}</td>
+                <td>${tm.abertura}</td>
+                <td>${tipoBadge}</td>
+                <td>${receitaFmt}</td>
+                <td>${pre4mFmt}</td>
+                <td style="font-weight:600;color:${isFuturo ? 'var(--text-muted)' : 'var(--secondary)'}">${ratioFmt}</td>
+            </tr>`;
+        });
+        if (hist.length === 0) {
+            turmasTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Nenhuma turma com dados suficientes</td></tr>`;
+        }
+    }
 }
 
 // Theme toggle
