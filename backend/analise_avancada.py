@@ -389,10 +389,12 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
         df_vendas['Quantidade de itens'].fillna(0).astype(float).sum()
     ) if 'Quantidade de itens' in df_vendas.columns else 0
 
-    raiz             = df_vendas[df_vendas['Nome do Produto'] == 'A Raiz da Solução']
+    _RAIZ = {'A Raiz da Solução', 'A Raiz da Solução 2.0'}
+    _is_raiz         = df_vendas['Nome do Produto'].isin(_RAIZ)
+    raiz             = df_vendas[_is_raiz]
     curso_padrao_liq  = float(raiz[raiz['Faturamento_Liquido'] >  LIMIAR_RENOVACAO]['Faturamento_Liquido'].sum())
     curso_renovacao_liq = float(raiz[raiz['Faturamento_Liquido'] <= LIMIAR_RENOVACAO]['Faturamento_Liquido'].sum())
-    outros_liq        = float(df_vendas[df_vendas['Nome do Produto'] != 'A Raiz da Solução']['Faturamento_Liquido'].sum())
+    outros_liq        = float(df_vendas[~_is_raiz]['Faturamento_Liquido'].sum())
 
     df_assin_col = 'Código do assinante'
     assinaturas_ativas = int(df_atual[
