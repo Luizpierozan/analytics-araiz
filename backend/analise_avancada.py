@@ -225,6 +225,14 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
 
     df_atual_all = _rows_to_df(rows_atual)
     df_atual     = df_atual_all[df_atual_all['Status'].isin(['Completo', 'Aprovado'])].copy()
+
+    # Normaliza renomeações de produto: trata versões novas como o nome canônico
+    # para não quebrar agrupamentos, gráficos e séries históricas.
+    _RENOMEAR_PRODUTO = {'A Raiz da Solução 2.0': 'A Raiz da Solução'}
+    if 'Nome do Produto' in df_atual.columns:
+        df_atual['Nome do Produto']     = df_atual['Nome do Produto'].replace(_RENOMEAR_PRODUTO)
+    if 'Nome do Produto' in df_atual_all.columns:
+        df_atual_all['Nome do Produto'] = df_atual_all['Nome do Produto'].replace(_RENOMEAR_PRODUTO)
     df_mom       = _rows_to_df([r for r in results['mom']  if r.get('Status') in ('Completo', 'Aprovado')])
     df_yoy       = _rows_to_df([r for r in results['yoy']  if r.get('Status') in ('Completo', 'Aprovado')])
     avg_dfs      = [
