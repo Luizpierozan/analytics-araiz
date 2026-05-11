@@ -73,7 +73,8 @@ def fetch_assinantes() -> list[dict]:
     q = (sb.table("transacoes")
            .select(cols)
            .not_.is_('"Código do assinante"', 'null')
-           .not_.ilike('"Nome do Produto"', '%experience%'))
+           .not_.ilike('"Nome do Produto"', '%experience%')
+           .order('"Data de Venda"'))
     return _paginate(q)
 
 
@@ -95,7 +96,8 @@ def fetch_approved_since(year: int = 2023) -> list[dict]:
            .select(cols)
            .in_("Status", ["Completo", "Aprovado"])
            .gte('"Data de Venda"', start)
-           .lte('"Data de Venda"', end))
+           .lte('"Data de Venda"', end)
+           .order('"Data de Venda"'))   # ORDER BY obrigatório para paginação determinística
     return _paginate(q)
 
 
@@ -113,14 +115,16 @@ def fetch_raiz_enrollments() -> list[dict]:
             .select(cols)
             .ilike('"Nome do Produto"', '%raiz%')
             .eq('"Recorrência"', 1)
-            .in_("Status", ["Completo", "Aprovado"]))
+            .in_("Status", ["Completo", "Aprovado"])
+            .order('"Data de Venda"'))
 
     # Recorrência nula: compras avulsas (parceladas sem assinatura formal)
     q2 = (sb.table("transacoes")
             .select(cols)
             .ilike('"Nome do Produto"', '%raiz%')
             .is_('"Recorrência"', 'null')
-            .in_("Status", ["Completo", "Aprovado"]))
+            .in_("Status", ["Completo", "Aprovado"])
+            .order('"Data de Venda"'))
 
     rows = _paginate(q1) + _paginate(q2)
     return rows
