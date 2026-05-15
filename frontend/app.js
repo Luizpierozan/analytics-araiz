@@ -843,6 +843,37 @@ function renderClientes(data) {
     } else {
         expTbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af">Nenhum aluno participou de 2+ edições</td></tr>';
     }
+
+    // ── LTV Médio Total com dropdown ─────────────────────────────────────────
+    const ltvByProd = data.ltv_by_product || {};
+    const ltvSelect = document.getElementById('ltvProdutoFilter');
+    const valLtvTotal = document.getElementById('valLtvTotal');
+    const lblLtvTotalClientes = document.getElementById('lblLtvTotalClientes');
+
+    // Populate dropdown (keep "Todos" first, then alphabetical)
+    ltvSelect.innerHTML = '';
+    const prodNames = Object.keys(ltvByProd).sort((a, b) => {
+        if (a === 'Todos') return -1;
+        if (b === 'Todos') return 1;
+        return a.localeCompare(b, 'pt-BR');
+    });
+    prodNames.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name === 'Todos' ? 'Todos os produtos' : name;
+        ltvSelect.appendChild(opt);
+    });
+
+    function updateLtvCard(prod) {
+        const entry = ltvByProd[prod];
+        if (!entry) return;
+        valLtvTotal.textContent = 'R$ ' + entry.ltv_medio.toLocaleString('pt-BR', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        lblLtvTotalClientes.textContent = entry.n_clientes.toLocaleString('pt-BR') + ' clientes';
+    }
+
+    ltvSelect.value = 'Todos';
+    updateLtvCard('Todos');
+    ltvSelect.onchange = () => updateLtvCard(ltvSelect.value);
 }
 
 // Theme toggle

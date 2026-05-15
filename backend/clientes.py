@@ -325,6 +325,50 @@ def compute_ltv_ranking(df_todos: pd.DataFrame, top_n: int = 100) -> list:
     return records[:top_n]
 
 
+# ── LTV Médio por Produto ─────────────────────────────────────────────────────
+
+def compute_ltv_by_product(df_todos: pd.DataFrame) -> dict:
+    """
+    LTV médio por produto + opção "Todos".
+    Para cada produto (exceto Mentoria, já filtrada), retorna:
+      ltv_medio   — média do gasto total de cada cliente único nesse produto
+      n_clientes  — quantos emails distintos compraram esse produto
+
+    "Todos" usa o gasto total por cliente somando todos os produtos.
+
+    Normaliza "A Raiz da Solução 2.0" → "A Raiz da Solução" para manter
+    a série histórica unificada no dropdown.
+    """
+    if df_todos.empty:
+        return {}
+
+    NOMES_RAIZ_UNIFICADO = {'A Raiz da Solução 2.0': 'A Raiz da Solução'}
+
+    df = df_todos[df_todos['Status'].isin(['Completo', 'Aprovado'])].copy()
+    df = _add_email_norm(df)
+    df = _add_fat_liq(df)
+    df['produto_norm'] = df['Nome do Produto'].replace(NOMES_RAIZ_UNIFICADO)
+
+    result = {}
+
+    # "Todos" — gasto total de cada cliente (soma todos os produtos)
+    total_por_email = df.groupby('email_norm')['fat_liq'].sum()
+    result['Todos'] = {
+        'ltv_medio':  round(float(total_por_email.mean()), 2),
+        'n_clientes': int(len(total_por_email)),
+    }
+
+    # Por produto
+    for prod, grp in df.groupby('produto_norm'):
+        by_email = grp.groupby('email_norm')['fat_liq'].sum()
+        result[prod] = {
+            'ltv_medio':  round(float(by_email.mean()), 2),
+            'n_clientes': int(len(by_email)),
+        }
+
+    return result
+
+
 # ── Experience Top ────────────────────────────────────────────────────────────
 
 def compute_experience_top(df_todos: pd.DataFrame, top_n: int = 50) -> list:
@@ -393,6 +437,7 @@ def get_clientes() -> dict:
     top_renovadores = compute_top_renovadores(turma_entries, top_n=50)
     ltv_ranking     = compute_ltv_ranking(df_todos, top_n=50)
     experience_top  = compute_experience_top(df_todos, top_n=50)
+    ltv_by_product  = compute_ltv_by_product(df_todos)
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
     total_unicos    = len(turma_entries)
@@ -417,6 +462,7 @@ def get_clientes() -> dict:
         'top_renovadores': top_renovadores,
         'ltv_ranking':     ltv_ranking,
         'experience_top':  experience_top,
+        'ltv_by_product':  ltv_by_product,
     }
     _cache['result'] = result
     _cache['ts'] = time.time()
