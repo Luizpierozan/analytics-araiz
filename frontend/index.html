@@ -18,6 +18,7 @@
             <a href="#" id="nav-geral" class="active">Visão Executiva</a>
             <a href="#" id="nav-inadimplencia">Inadimplência</a>
             <a href="#" id="nav-projecoes">Projeções</a>
+            <a href="#" id="nav-clientes">Inteligência de Alunos</a>
         </nav>
         <div class="upload-container">
             <p class="micro-text" id="userInfo" style="margin-bottom:0.5rem;font-weight:500;color:var(--text-main)"></p>
@@ -314,6 +315,132 @@
                         </tr>
                     </thead>
                     <tbody id="cohortsTbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- PAGE 4: Inteligência de Alunos -->
+        <div id="page-clientes" class="page hidden">
+            <header>
+                <h1>Inteligência de Alunos</h1>
+                <p>RFM, jornada entre turmas, top renovadores e lifetime value.</p>
+            </header>
+
+            <!-- KPIs -->
+            <div class="cards">
+                <div class="card">
+                    <h3>Alunos Únicos</h3>
+                    <p id="valAlunosUnicos" class="val">0</p>
+                    <p class="mom card-label">Emails únicos — A Raiz da Solução</p>
+                </div>
+                <div class="card">
+                    <h3>Renovaram 1x ou mais</h3>
+                    <p id="valMultiTurma" class="val">0</p>
+                    <p id="valTaxaRetorno" class="mom card-label">—</p>
+                </div>
+                <div class="card">
+                    <h3>LTV Médio — Top 100</h3>
+                    <p id="valLtvMedio" class="val">R$ 0</p>
+                    <p class="mom card-label">Maior valor acumulado por cliente</p>
+                </div>
+                <div class="card">
+                    <h3>RFM — Campeões</h3>
+                    <p id="valCampeoes" class="val">0</p>
+                    <p class="mom card-label">Alunos em múltiplas turmas, recentes</p>
+                </div>
+            </div>
+
+            <!-- Cross-turma matrix -->
+            <div class="table-container mt-2">
+                <h3>Matriz Cross-Turma — Origem × Destino</h3>
+                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                    Para cada turma de destino, quantos alunos vieram de cada turma anterior.
+                    <span style="color:#2563eb">■</span> Ativa (≤16 meses) &nbsp;
+                    <span style="color:#dc2626">■</span> Inativa (&gt;16 meses) &nbsp;
+                    <span style="color:#6b7280">Novo</span> = primeira turma do aluno
+                </p>
+                <div id="crossTurmaWrapper" style="overflow-x:auto">
+                    <table class="modern-table" id="crossTurmaTable">
+                        <thead id="crossTurmaHead"></thead>
+                        <tbody id="crossTurmaTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- RFM -->
+            <div class="charts-row mt-2">
+                <div class="chart-container chart-sm">
+                    <h3>Segmentos RFM</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+                        Recência × Frequência × Monetário — somente A Raiz da Solução
+                    </p>
+                    <canvas id="rfmChart"></canvas>
+                </div>
+                <div class="chart-container chart-sm">
+                    <h3>Legenda dos Segmentos</h3>
+                    <table class="modern-table" style="font-size:12px">
+                        <thead><tr><th>Segmento</th><th>Critério simplificado</th></tr></thead>
+                        <tbody>
+                            <tr><td>🏆 Campeão</td><td>R≥4, F≥4, M≥4 — fiéis de alto valor</td></tr>
+                            <tr><td>💚 Leal Ativo</td><td>R≥3, F≥3 — retornam com regularidade</td></tr>
+                            <tr><td>🌱 Novo Promissor</td><td>R≥4, F=1 — recém-entrou</td></tr>
+                            <tr><td>⚠️ Em Risco</td><td>R≤2, F≥3 — foi fiel, sumiu</td></tr>
+                            <tr><td>😴 Adormecido</td><td>R≤2, F≥2 — parou de renovar</td></tr>
+                            <tr><td>❌ Perdido</td><td>R=1, F=1 — uma compra, muito tempo</td></tr>
+                            <tr><td>⚪ Regular</td><td>Demais casos</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Top Renovadores -->
+            <div class="table-container mt-2">
+                <h3>Top 100 Renovadores — Maior Histórico de Turmas</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Email</th>
+                            <th>Turmas</th>
+                            <th>Nº Turmas</th>
+                            <th>Período ativo</th>
+                            <th>Total pago</th>
+                        </tr>
+                    </thead>
+                    <tbody id="renovadoresTbody"></tbody>
+                </table>
+            </div>
+
+            <!-- LTV Ranking -->
+            <div class="table-container mt-2">
+                <h3>Top 100 — Lifetime Value (todos os produtos exceto Mentoria)</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Email</th>
+                            <th>LTV Total</th>
+                            <th>Produtos</th>
+                            <th>Período</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ltvTbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Experience Top -->
+            <div class="table-container mt-2">
+                <h3>Fãs do Experience — Participou em 2+ edições</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Email</th>
+                            <th>Edições</th>
+                            <th>Total pago</th>
+                        </tr>
+                    </thead>
+                    <tbody id="experienceTbody"></tbody>
                 </table>
             </div>
         </div>

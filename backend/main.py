@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from auth import router as auth_router, get_current_user, require_superadmin
 from analise_avancada import ingest_new_file, get_dashboard_geral, get_inadimplencia
 from projecoes import get_projecoes, invalidate_cache
+from clientes import get_clientes, invalidate_cache as invalidate_cache_clientes
 from dotenv import load_dotenv
 import os, tempfile
 
@@ -53,6 +54,7 @@ async def upload_file(
 
         if linhas is not False:
             invalidate_cache()  # força recálculo das projeções
+            invalidate_cache_clientes()
             return {"sucesso": True, "linhas": linhas}
         else:
             return JSONResponse({"sucesso": False, "erro": "Erro ao processar arquivo"}, status_code=500)
@@ -73,6 +75,11 @@ async def dashboard(
 @app.get("/api/projecoes")
 async def projecoes(user: dict = Depends(get_current_user)):
     return get_projecoes()
+
+
+@app.get("/api/clientes")
+async def clientes(user: dict = Depends(get_current_user)):
+    return get_clientes()
 
 
 @app.get("/api/inadimplencia")

@@ -17,9 +17,11 @@ async function checkAuth() {
 const navGeral    = document.getElementById('nav-geral');
 const navInad     = document.getElementById('nav-inadimplencia');
 const navProj     = document.getElementById('nav-projecoes');
+const navClientes = document.getElementById('nav-clientes');
 const pageGeral   = document.getElementById('page-geral');
 const pageInad    = document.getElementById('page-inadimplencia');
 const pageProj    = document.getElementById('page-projecoes');
+const pageClientes = document.getElementById('page-clientes');
 const fileInput   = document.getElementById('fileInput');
 const btnUpload   = document.getElementById('btnUpload');
 const loading     = document.getElementById('loading');
@@ -41,12 +43,14 @@ let evolucaoChart    = null;
 let survivalChart      = null;
 let projecaoChart      = null;
 let sazonalidadeChart  = null;
+let rfmChart           = null;
 
 let projecoesLoaded = false;  // carrega só quando a aba for aberta pela primeira vez
+let clientesLoaded  = false;
 
 function showPage(page) {
-    [pageGeral, pageInad, pageProj].forEach(p => p.classList.add('hidden'));
-    [navGeral, navInad, navProj].forEach(n => n.classList.remove('active'));
+    [pageGeral, pageInad, pageProj, pageClientes].forEach(p => p.classList.add('hidden'));
+    [navGeral, navInad, navProj, navClientes].forEach(n => n.classList.remove('active'));
     page.classList.remove('hidden');
 }
 
@@ -71,6 +75,12 @@ navProj.addEventListener('click', async (e) => {
         } catch(err) { console.error('Erro projeções', err); }
         finally { hideLoading(); }
     }
+});
+
+navClientes.addEventListener('click', e => {
+    e.preventDefault();
+    showPage(pageClientes); navClientes.classList.add('active');
+    if (!clientesLoaded) loadClientes();
 });
 
 // Upload
@@ -707,6 +717,168 @@ function renderProjecoes(data) {
         if (hist.length === 0) {
             turmasTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Nenhuma turma com dados suficientes</td></tr>`;
         }
+    }
+}
+
+// ── Inteligência de Alunos ────────────────────────────────────────────────────
+async function loadClientes() {
+    showLoading('Carregando Inteligência de Alunos...');
+    try {
+        const res  = await fetch('/api/clientes');
+        const data = await res.json();
+        if (!data.sucesso) throw new Error(data.erro || 'Erro');
+        renderClientes(data);
+        clientesLoaded = true;
+    } catch(e) {
+        console.error(e);
+    } finally {
+        hideLoading();
+    }
+}
+
+function renderClientes(data) {
+    const k = data.kpis;
+    document.getElementById('valAlunosUnicos').innerText = k.total_alunos_unicos.toLocaleString('pt-BR');
+    document.getElementById('valMultiTurma').innerText   = k.multi_turma.toLocaleString('pt-BR');
+    document.getElementById('valTaxaRetorno').innerText  = `${(k.taxa_retorno * 100).toFixed(1)}% de taxa de retorno`;
+    document.getElementById('valLtvMedio').innerText     = 'R$ ' + k.ltv_medio_top100.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0});
+    const campeoes = (data.rfm.segments || {})['Campeão'] || 0;
+    document.getElementById('valCampeoes').innerText     = campeoes;
+
+    // ── Cross-turma matrix ──────────────────────────────────────────────────
+    const ct = data.cross_turma;
+    if (ct && ct.destinations && ct.destinations.length) {
+        // Header
+        const thead = document.getElementById('crossTurmaHead');
+        thead.innerHTML = '<tr><th>Origem \\ Destino</th>' +
+            ct.destinations.map(d => `<th>${d}</th>`).join('') + '</tr>';
+
+        // Max value for color scale
+        const allVals = [];
+        ct.rows.forEach(row => {
+            ct.destinations.forEach(d => {
+                const c = row.cells[d];
+                if (c) allVals.push(typeof c === 'object' ? c.total : c);
+            });
+        });
+        const maxVal = Math.max(...allVals, 1);
+
+        const tbody = document.getElementById('crossTurmaTbody');
+        tbody.innerHTML = ct.rows.map(row => {
+            const cells = ct.destinations.map(d => {
+                const c = row.cells[d];
+                if (!c) return '<td style="color:#d1d5db">—</td>';
+                if (typeof c === 'number') {
+                    // "Novo"
+                    const bg = `rgba(37,99,235,${(c/maxVal*0.6).toFixed(2)})`;
+                    return `<td style="background:${bg};font-weight:500">${c}</td>`;
+                }
+                // transition object: {total, ativa, inativa}
+                const bg = `rgba(37,99,235,${(c.total/maxVal*0.5).toFixed(2)})`;
+                const tooltip = `Ativa: ${c.ativa} | Inativa: ${c.inativa}`;
+                return `<td style="background:${bg}" title="${tooltip}">
+                    <span style="font-weight:500">${c.total}</span>
+                    <span style="font-size:10px;display:block;color:rgba(255,255,255,0.85)">
+                        <span style="color:#60a5fa">${c.ativa}a</span> / <span style="color:#f87171">${c.inativa}i</span>
+                    </span>
+                </td>`;
+            }).join('');
+            return `<tr><td style="font-weight:600">${row.origem}</td>${cells}</tr>`;
+        }).join('');
+
+        // Totals row
+        const totalsRow = '<tr style="font-weight:700;border-top:2px solid var(--border)">' +
+            '<td>Total</td>' +
+            ct.destinations.map(d => `<td>${ct.totals[d] || 0}</td>`).join('') +
+            '</tr>';
+        tbody.innerHTML += totalsRow;
+    }
+
+    // ── RFM Chart ───────────────────────────────────────────────────────────
+    const segments = data.rfm.segments || {};
+    const SEG_COLORS = {
+        'Campeão':        '#2563eb',
+        'Leal Ativo':     '#16a34a',
+        'Novo Promissor': '#0891b2',
+        'Em Risco':       '#d97706',
+        'Adormecido':     '#9ca3af',
+        'Perdido':        '#dc2626',
+        'Regular':        '#6b7280',
+    };
+    const segLabels = Object.keys(segments);
+    const segVals   = segLabels.map(s => segments[s]);
+    const segColors = segLabels.map(s => SEG_COLORS[s] || '#6b7280');
+
+    if (rfmChart) rfmChart.destroy();
+    rfmChart = new Chart(document.getElementById('rfmChart'), {
+        type: 'bar',
+        data: {
+            labels: segLabels,
+            datasets: [{
+                data: segVals,
+                backgroundColor: segColors,
+                borderRadius: 6,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { grid: { display: false } },
+            }
+        }
+    });
+
+    // ── Top Renovadores ─────────────────────────────────────────────────────
+    const renovTbody = document.getElementById('renovadoresTbody');
+    renovTbody.innerHTML = data.top_renovadores.map((r, i) => {
+        const badges = r.turmas.map(t =>
+            `<span style="display:inline-block;background:#2563eb;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;margin:1px">${t}</span>`
+        ).join('');
+        return `<tr>
+            <td style="color:#6b7280">${i+1}</td>
+            <td style="font-size:12px">${r.email}</td>
+            <td>${badges}</td>
+            <td style="text-align:center;font-weight:600">${r.n_turmas}</td>
+            <td style="font-size:12px">${r.primeiro} – ${r.ultimo}</td>
+            <td>R$ ${r.total_pago.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+        </tr>`;
+    }).join('');
+
+    // ── LTV Ranking ─────────────────────────────────────────────────────────
+    const ltvTbody = document.getElementById('ltvTbody');
+    ltvTbody.innerHTML = data.ltv_ranking.map((r, i) => {
+        const prods = r.produtos.map(p => {
+            const short = p.length > 25 ? p.substring(0,22)+'…' : p;
+            return `<span style="font-size:10px;background:var(--card-bg);border:1px solid var(--border);border-radius:3px;padding:1px 4px;margin:1px;display:inline-block">${short}</span>`;
+        }).join('');
+        return `<tr>
+            <td style="color:#6b7280">${i+1}</td>
+            <td style="font-size:12px">${r.email}</td>
+            <td style="font-weight:600;color:#2563eb">R$ ${r.ltv.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+            <td>${prods}</td>
+            <td style="font-size:12px">${r.primeira_compra} – ${r.ultima_compra}</td>
+        </tr>`;
+    }).join('');
+
+    // ── Experience Top ──────────────────────────────────────────────────────
+    const expTbody = document.getElementById('experienceTbody');
+    if (data.experience_top && data.experience_top.length) {
+        expTbody.innerHTML = data.experience_top.map((r, i) => {
+            const evs = r.eventos.map(e => {
+                const y = e.match(/\d{4}/)?.[0] || '';
+                return `<span style="background:#f59e0b;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;margin:1px">${y || e.substring(0,10)}</span>`;
+            }).join('');
+            return `<tr>
+                <td style="color:#6b7280">${i+1}</td>
+                <td style="font-size:12px">${r.email}</td>
+                <td>${evs}</td>
+                <td>R$ ${r.total_pago.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+            </tr>`;
+        }).join('');
+    } else {
+        expTbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af">Nenhum aluno participou de 2+ edições</td></tr>';
     }
 }
 

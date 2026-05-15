@@ -130,6 +130,27 @@ def fetch_raiz_enrollments() -> list[dict]:
     return rows
 
 
+def fetch_all_approved_by_email(year: int = 2022) -> list[dict]:
+    """Todas as transações aprovadas desde year, com Email. Exclui Mentoria R100."""
+    sb = get_supabase()
+    cols = ",".join([
+        '"Email"', '"Nome do Produto"', '"Recorrência"', '"Status"',
+        '"Data de Venda"', '"Faturamento líquido"', '"Preço Total Convertido"',
+        '"Preço Total"', '"Moeda de recebimento"', '"Taxa de Câmbio Real"',
+        '"Taxa de Câmbio do valor recebido"', '"Valor que você recebeu convertido"',
+    ])
+    start = f"{year}-01-01T00:00:00"
+    end = pd.Timestamp.now().strftime('%Y-%m-%dT%H:%M:%S')
+    q = (sb.table("transacoes")
+           .select(cols)
+           .in_("Status", ["Completo", "Aprovado"])
+           .not_.ilike('"Nome do Produto"', '%mentoria%')
+           .gte('"Data de Venda"', start)
+           .lte('"Data de Venda"', end)
+           .order('"Data de Venda"'))
+    return _paginate(q)
+
+
 def fetch_emails_before(end_iso: str) -> set:
     """Retorna conjunto de e-mails de clientes que compraram ANTES de end_iso.
 
