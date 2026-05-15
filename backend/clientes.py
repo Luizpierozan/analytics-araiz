@@ -390,15 +390,16 @@ def get_clientes() -> dict:
     turma_entries   = build_turma_entries(df_raiz)
     cross_turma     = compute_cross_turma(turma_entries)
     rfm             = compute_rfm(turma_entries, df_todos)
-    top_renovadores = compute_top_renovadores(turma_entries, top_n=100)
-    ltv_ranking     = compute_ltv_ranking(df_todos, top_n=100)
+    top_renovadores = compute_top_renovadores(turma_entries, top_n=50)
+    ltv_ranking     = compute_ltv_ranking(df_todos, top_n=50)
     experience_top  = compute_experience_top(df_todos, top_n=50)
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
-    total_unicos = len(turma_entries)
-    multi_turma  = sum(1 for e in turma_entries.values() if len(e) >= 2)
+    total_unicos    = len(turma_entries)
+    multi_turma     = sum(1 for e in turma_entries.values() if len(e) >= 2)
+    tres_mais_turmas = sum(1 for e in turma_entries.values() if len(e) >= 3)
     ltv_medio    = (
-        round(sum(r['ltv'] for r in ltv_ranking[:100]) / len(ltv_ranking[:100]), 2)
+        round(sum(r['ltv'] for r in ltv_ranking[:50]) / len(ltv_ranking[:50]), 2)
         if ltv_ranking else 0
     )
 
@@ -409,6 +410,7 @@ def get_clientes() -> dict:
             'multi_turma':         multi_turma,
             'taxa_retorno':        round(multi_turma / total_unicos, 4) if total_unicos else 0,
             'ltv_medio_top100':    ltv_medio,
+            'tres_mais_turmas':    tres_mais_turmas,
         },
         'cross_turma':     cross_turma,
         'rfm':             rfm,

@@ -323,7 +323,7 @@
         <div id="page-clientes" class="page hidden">
             <header>
                 <h1>Inteligência de Alunos</h1>
-                <p>RFM, jornada entre turmas, top renovadores e lifetime value.</p>
+                <p>Jornada entre turmas, top renovadores e lifetime value.</p>
             </header>
 
             <!-- KPIs -->
@@ -339,14 +339,14 @@
                     <p id="valTaxaRetorno" class="mom card-label">—</p>
                 </div>
                 <div class="card">
-                    <h3>LTV Médio — Top 100</h3>
+                    <h3>LTV Médio — Top 50</h3>
                     <p id="valLtvMedio" class="val">R$ 0</p>
                     <p class="mom card-label">Maior valor acumulado por cliente</p>
                 </div>
                 <div class="card">
-                    <h3>RFM — Campeões</h3>
-                    <p id="valCampeoes" class="val">0</p>
-                    <p class="mom card-label">Alunos em múltiplas turmas, recentes</p>
+                    <h3>Participaram 3+ Turmas</h3>
+                    <p id="valTresMaisTurmas" class="val">0</p>
+                    <p class="mom card-label">Alunos de alta fidelidade</p>
                 </div>
             </div>
 
@@ -367,35 +367,9 @@
                 </div>
             </div>
 
-            <!-- RFM -->
-            <div class="charts-row mt-2">
-                <div class="chart-container chart-sm">
-                    <h3>Segmentos RFM</h3>
-                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
-                        Recência × Frequência × Monetário — somente A Raiz da Solução
-                    </p>
-                    <canvas id="rfmChart"></canvas>
-                </div>
-                <div class="chart-container chart-sm">
-                    <h3>Legenda dos Segmentos</h3>
-                    <table class="modern-table" style="font-size:12px">
-                        <thead><tr><th>Segmento</th><th>Critério simplificado</th></tr></thead>
-                        <tbody>
-                            <tr><td>🏆 Campeão</td><td>R≥4, F≥4, M≥4 — fiéis de alto valor</td></tr>
-                            <tr><td>💚 Leal Ativo</td><td>R≥3, F≥3 — retornam com regularidade</td></tr>
-                            <tr><td>🌱 Novo Promissor</td><td>R≥4, F=1 — recém-entrou</td></tr>
-                            <tr><td>⚠️ Em Risco</td><td>R≤2, F≥3 — foi fiel, sumiu</td></tr>
-                            <tr><td>😴 Adormecido</td><td>R≤2, F≥2 — parou de renovar</td></tr>
-                            <tr><td>❌ Perdido</td><td>R=1, F=1 — uma compra, muito tempo</td></tr>
-                            <tr><td>⚪ Regular</td><td>Demais casos</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
             <!-- Top Renovadores -->
             <div class="table-container mt-2">
-                <h3>Top 100 Renovadores — Maior Histórico de Turmas</h3>
+                <h3>Top 50 Renovadores — Maior Histórico de Turmas</h3>
                 <table class="modern-table">
                     <thead>
                         <tr>
@@ -413,7 +387,7 @@
 
             <!-- LTV Ranking -->
             <div class="table-container mt-2">
-                <h3>Top 100 — Lifetime Value (todos os produtos exceto Mentoria)</h3>
+                <h3>Top 50 — Lifetime Value (todos os produtos exceto Mentoria)</h3>
                 <table class="modern-table">
                     <thead>
                         <tr>

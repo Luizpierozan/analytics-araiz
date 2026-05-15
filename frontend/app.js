@@ -742,8 +742,7 @@ function renderClientes(data) {
     document.getElementById('valMultiTurma').innerText   = k.multi_turma.toLocaleString('pt-BR');
     document.getElementById('valTaxaRetorno').innerText  = `${(k.taxa_retorno * 100).toFixed(1)}% de taxa de retorno`;
     document.getElementById('valLtvMedio').innerText     = 'R$ ' + k.ltv_medio_top100.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0});
-    const campeoes = (data.rfm.segments || {})['Campeão'] || 0;
-    document.getElementById('valCampeoes').innerText     = campeoes;
+    document.getElementById('valTresMaisTurmas').innerText = (k.tres_mais_turmas ?? 0).toLocaleString('pt-BR');
 
     // ── Cross-turma matrix ──────────────────────────────────────────────────
     const ct = data.cross_turma;
@@ -793,42 +792,6 @@ function renderClientes(data) {
             '</tr>';
         tbody.innerHTML += totalsRow;
     }
-
-    // ── RFM Chart ───────────────────────────────────────────────────────────
-    const segments = data.rfm.segments || {};
-    const SEG_COLORS = {
-        'Campeão':        '#2563eb',
-        'Leal Ativo':     '#16a34a',
-        'Novo Promissor': '#0891b2',
-        'Em Risco':       '#d97706',
-        'Adormecido':     '#9ca3af',
-        'Perdido':        '#dc2626',
-        'Regular':        '#6b7280',
-    };
-    const segLabels = Object.keys(segments);
-    const segVals   = segLabels.map(s => segments[s]);
-    const segColors = segLabels.map(s => SEG_COLORS[s] || '#6b7280');
-
-    if (rfmChart) rfmChart.destroy();
-    rfmChart = new Chart(document.getElementById('rfmChart'), {
-        type: 'bar',
-        data: {
-            labels: segLabels,
-            datasets: [{
-                data: segVals,
-                backgroundColor: segColors,
-                borderRadius: 6,
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { grid: { color: 'rgba(255,255,255,0.05)' } },
-                y: { grid: { display: false } },
-            }
-        }
-    });
 
     // ── Top Renovadores ─────────────────────────────────────────────────────
     const renovTbody = document.getElementById('renovadoresTbody');
