@@ -342,23 +342,36 @@ def compute_ltv_by_product(df_todos: pd.DataFrame) -> dict:
     if df_todos.empty:
         return {}
 
-    NOMES_RAIZ_UNIFICADO = {'A Raiz da Solução 2.0': 'A Raiz da Solução'}
-
     df = df_todos[df_todos['Status'].isin(['Completo', 'Aprovado'])].copy()
     df = _add_email_norm(df)
     df = _add_fat_liq(df)
-    df['produto_norm'] = df['Nome do Produto'].replace(NOMES_RAIZ_UNIFICADO)
+
+    # Normaliza nomes: A Raiz 2.0 → A Raiz; qualquer Experience → "Experience";
+    # exclui Sinal (evento pontual, não faz sentido em LTV médio por produto)
+    def _norm_produto(nome: str) -> str | None:
+        if not isinstance(nome, str):
+            return None
+        if 'sinal' in nome.lower():
+            return None          # será descartado
+        if 'experience' in nome.lower():
+            return 'Experience'  # unifica todas as edições
+        if 'A Raiz da Solução 2.0' == nome:
+            return 'A Raiz da Solução'
+        return nome
+
+    df['produto_norm'] = df['Nome do Produto'].apply(_norm_produto)
+    df = df[df['produto_norm'].notna()]   # remove Sinal e nomes nulos
 
     result = {}
 
-    # "Todos" — gasto total de cada cliente (soma todos os produtos)
+    # "Todos" — gasto total de cada cliente (soma todos os produtos restantes)
     total_por_email = df.groupby('email_norm')['fat_liq'].sum()
     result['Todos'] = {
         'ltv_medio':  round(float(total_por_email.mean()), 2),
         'n_clientes': int(len(total_por_email)),
     }
 
-    # Por produto
+    # Por produto normalizado
     for prod, grp in df.groupby('produto_norm'):
         by_email = grp.groupby('email_norm')['fat_liq'].sum()
         result[prod] = {
