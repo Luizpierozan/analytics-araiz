@@ -118,7 +118,7 @@ def compute_cross_turma(turma_entries: dict) -> dict:
     Renovação inativa = gap > LIMIAR_ATIVO_MESES
     """
     turma_ids = [t['id'] for t in TURMA_COHORTS]
-    dest_ids  = turma_ids[1:]   # T3 em diante (T2 não tem "destino" útil)
+    dest_ids  = turma_ids       # todas as turmas são destino (T1 inclusive)
 
     # Acumula transições: dest_id → origin_label → {total, ativa, inativa}
     data: dict[int, dict] = {d: {} for d in dest_ids}
