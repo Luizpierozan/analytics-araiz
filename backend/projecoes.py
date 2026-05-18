@@ -21,8 +21,8 @@ LIMIAR_RENOVACAO = 4200.0  # preço líquido abaixo disso = renovação
 # Janelas exatas de vendas por turma (início e fim inclusive, comparação por data)
 # Fonte única de verdade — usada em clientes.py e projecoes.py
 _TURMA_JANELAS = [
-    (1, '2021-08-01', '2022-05-30'),
-    (2, '2022-05-31', '2022-09-06'),
+    (1, '2021-08-01', '2021-09-30'),
+    (2, '2022-05-01', '2022-09-06'),
     (3, '2022-09-07', '2023-06-19'),
     (4, '2023-10-01', '2023-12-09'),
     (5, '2023-12-10', '2024-07-24'),
