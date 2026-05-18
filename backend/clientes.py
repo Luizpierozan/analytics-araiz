@@ -441,7 +441,7 @@ def get_clientes() -> dict:
     tasks = {
         'raiz':  fetch_raiz_enrollments,
         'assin': fetch_assinantes,
-        'todos': fetch_all_approved_by_email,
+        'todos': lambda: fetch_all_approved_by_email(year=2021),  # inclui T1 (Ago/2021)
     }
     fetched: dict = {}
     with ThreadPoolExecutor(max_workers=3) as pool:
