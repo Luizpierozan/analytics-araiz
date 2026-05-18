@@ -641,6 +641,7 @@ def compute_historico_turmas(monthly: pd.Series) -> list[dict]:
                 "id":       t["id"],
                 "abertura": t["abertura"],
                 "final":    t.get("final", ""),
+                "tipo":     t["tipo"],   # usado internamente por projetar_turmas
                 "receita":  None,
                 "pre_4m":   None,
                 "ratio":    None,
@@ -655,6 +656,7 @@ def compute_historico_turmas(monthly: pd.Series) -> list[dict]:
             "id":       t["id"],
             "abertura": t["abertura"],
             "final":    t.get("final", ""),
+            "tipo":     t["tipo"],   # usado internamente por projetar_turmas
             "receita":  round(receita, 2),
             "pre_4m":   round(pre_4m, 2),
             "ratio":    round(receita / pre_4m, 4) if pre_4m > 0 else None,
