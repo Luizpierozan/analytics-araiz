@@ -1,3 +1,49 @@
+// ── Tabelas sortáveis ─────────────────────────────────────────────────────
+function initSortableTable(tableId) {
+    const table  = document.getElementById(tableId);
+    if (!table) return;
+    const thead  = table.querySelector('thead tr');
+    const tbody  = table.querySelector('tbody');
+    const state  = { col: -1, asc: true };
+
+    thead.querySelectorAll('th.sortable').forEach((th, _) => {
+        // índice real da th dentro da tr
+        const colIdx = Array.from(thead.children).indexOf(th);
+        th.addEventListener('click', () => {
+            const asc = state.col === colIdx ? !state.asc : true;
+            state.col = colIdx;
+            state.asc = asc;
+
+            // Atualiza classes de seta
+            thead.querySelectorAll('th.sortable').forEach(h => {
+                h.classList.remove('sort-asc', 'sort-desc');
+            });
+            th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+
+            // Ordena as linhas
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort((a, b) => {
+                const aCell = a.cells[colIdx];
+                const bCell = b.cells[colIdx];
+                // Preferir data-val numérico se existir
+                const aNum = parseFloat(aCell.dataset.val);
+                const bNum = parseFloat(bCell.dataset.val);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return asc ? aNum - bNum : bNum - aNum;
+                }
+                const aStr = aCell.textContent.trim();
+                const bStr = bCell.textContent.trim();
+                return asc
+                    ? aStr.localeCompare(bStr, 'pt-BR')
+                    : bStr.localeCompare(aStr, 'pt-BR');
+            });
+
+            // Reinsere linhas na ordem nova (rank original mantido)
+            rows.forEach(r => tbody.appendChild(r));
+        });
+    });
+}
+
 // ── Auth: verifica sessão antes de carregar qualquer dado ─────────────────
 async function checkAuth() {
     try {
@@ -808,15 +854,20 @@ function renderClientes(data) {
         const badges = r.turmas.map(t =>
             `<span style="display:inline-block;background:#2563eb;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;margin:1px">${t}</span>`
         ).join('');
-        return `<tr>
+        const assinBadge = r.assinante
+            ? `<span class="badge-assinante">Assinante</span>`
+            : `<span class="badge-nao-assinante">Avulso</span>`;
+        return `<tr data-rank="${i+1}">
             <td style="color:#6b7280">${i+1}</td>
-            <td style="font-size:12px">${r.email}</td>
+            <td title="${r.email}">${r.nome}</td>
             <td>${badges}</td>
-            <td style="text-align:center;font-weight:600">${r.n_turmas}</td>
+            <td style="text-align:center;font-weight:600" data-val="${r.n_turmas}">${r.n_turmas}</td>
             <td style="font-size:12px">${r.primeiro} – ${r.ultimo}</td>
-            <td>R$ ${r.total_pago.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+            <td data-val="${r.total_pago}">R$ ${r.total_pago.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+            <td>${assinBadge}</td>
         </tr>`;
     }).join('');
+    initSortableTable('renovadoresTable');
 
     // ── LTV Ranking ─────────────────────────────────────────────────────────
     const ltvTbody = document.getElementById('ltvTbody');
@@ -825,14 +876,15 @@ function renderClientes(data) {
             const short = p.length > 25 ? p.substring(0,22)+'…' : p;
             return `<span style="font-size:10px;background:var(--card-bg);border:1px solid var(--border);border-radius:3px;padding:1px 4px;margin:1px;display:inline-block">${short}</span>`;
         }).join('');
-        return `<tr>
+        return `<tr data-rank="${i+1}">
             <td style="color:#6b7280">${i+1}</td>
-            <td style="font-size:12px">${r.email}</td>
-            <td style="font-weight:600;color:#2563eb">R$ ${r.ltv.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+            <td title="${r.email}">${r.nome}</td>
+            <td style="font-weight:600;color:#2563eb" data-val="${r.ltv}">R$ ${r.ltv.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
             <td>${prods}</td>
             <td style="font-size:12px">${r.primeira_compra} – ${r.ultima_compra}</td>
         </tr>`;
     }).join('');
+    initSortableTable('ltvTable');
 
     // ── Experience Top ──────────────────────────────────────────────────────
     const expTbody = document.getElementById('experienceTbody');
@@ -842,13 +894,14 @@ function renderClientes(data) {
                 const y = e.match(/\d{4}/)?.[0] || '';
                 return `<span style="background:#f59e0b;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;margin:1px">${y || e.substring(0,10)}</span>`;
             }).join('');
-            return `<tr>
+            return `<tr data-rank="${i+1}">
                 <td style="color:#6b7280">${i+1}</td>
-                <td style="font-size:12px">${r.email}</td>
-                <td>${evs}</td>
-                <td>R$ ${r.total_pago.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+                <td title="${r.email}">${r.nome}</td>
+                <td data-val="${r.n_eventos}">${evs}</td>
+                <td data-val="${r.total_pago}">R$ ${r.total_pago.toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0})}</td>
             </tr>`;
         }).join('');
+        initSortableTable('experienceTable');
     } else {
         expTbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af">Nenhum aluno participou de 2+ edições</td></tr>';
     }

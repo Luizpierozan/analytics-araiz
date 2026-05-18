@@ -48,6 +48,28 @@ def _add_email_norm(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _resolve_names(df_todos: pd.DataFrame) -> dict[str, str]:
+    """Constrói mapa email_norm → nome normalizado (Title Case).
+
+    Pega o nome mais recente de cada email em df_todos.
+    Aplica capitalização: 'LUIZ AUGUSTO PIEROZAN' → 'Luiz Augusto Pierozan'.
+    """
+    if df_todos.empty or 'Nome' not in df_todos.columns:
+        return {}
+    df = df_todos[['Email', 'Nome', 'Data de Venda']].copy()
+    df['email_norm'] = df['Email'].astype(str).str.lower().str.strip()
+    df = df.sort_values('Data de Venda', ascending=False)
+    nome_map: dict[str, str] = {}
+    for email, grp in df.groupby('email_norm'):
+        nome_raw = grp['Nome'].dropna()
+        if nome_raw.empty:
+            continue
+        nome = str(nome_raw.iloc[0]).strip()
+        if nome:
+            nome_map[email] = ' '.join(w.capitalize() for w in nome.split())
+    return nome_map
+
+
 def _assign_turma(purchase_date: pd.Timestamp) -> int | None:
     """Atribui turma pela janela de vendas oficial (comparação por data, sem hora)."""
     if pd.isna(purchase_date):
@@ -277,15 +299,15 @@ def compute_top_renovadores(
     turma_entries: dict,
     df_base: pd.DataFrame = None,
     top_n: int = 100,
+    nome_map: dict = None,
+    assin_emails: set = None,
 ) -> list:
     """Top N alunos por nº de turmas participadas (somente quem renovou ≥1x).
 
-    total_pago: soma de TODOS os pagamentos do produto base (todas as Recorrências),
-    obtida de df_base (df_todos filtrado ao curso base + status Completo/Aprovado).
-    Se df_base não for fornecido, usa apenas a 1ª compra por turma (fallback).
-    Isso garante que assinantes (Rec=1..12) tenham o total real, não só Rec=1.
+    total_pago: soma de TODOS os pagamentos do produto base (todas as Recorrências).
+    nome: nome do cliente em Title Case (de nome_map).
+    assinante: True se o email aparece em assin_emails (teve subscriber code alguma vez).
     """
-    # Pré-computa total real por email a partir de todos os pagamentos
     total_por_email: dict[str, float] = {}
     if df_base is not None and not df_base.empty:
         df_ok = df_base[df_base['Status'].isin(['Completo', 'Aprovado'])].copy()
@@ -301,9 +323,11 @@ def compute_top_renovadores(
             continue
         total = total_por_email.get(email) if total_por_email else None
         if total is None:
-            total = sum(e['fat_liq'] for e in entries)   # fallback
+            total = sum(e['fat_liq'] for e in entries)
         records.append({
             'email':       email,
+            'nome':        (nome_map or {}).get(email, email),
+            'assinante':   email in (assin_emails or set()),
             'n_turmas':    len(entries),
             'turmas':      [f"T{e['turma_id']}" for e in entries],
             'total_pago':  round(total, 2),
@@ -319,7 +343,7 @@ def compute_top_renovadores(
 
 # ── LTV Ranking ───────────────────────────────────────────────────────────────
 
-def compute_ltv_ranking(df_todos: pd.DataFrame, top_n: int = 100) -> list:
+def compute_ltv_ranking(df_todos: pd.DataFrame, top_n: int = 100, nome_map: dict = None) -> list:
     """Top N clientes por LTV total (todos os produtos exceto Mentoria)."""
     if df_todos.empty:
         return []
@@ -335,6 +359,7 @@ def compute_ltv_ranking(df_todos: pd.DataFrame, top_n: int = 100) -> list:
         products = grp['Nome do Produto'].dropna().unique().tolist()
         records.append({
             'email':          email,
+            'nome':           (nome_map or {}).get(email, email),
             'ltv':            round(total, 2),
             'n_produtos':     len(products),
             'produtos':       products[:6],
@@ -404,7 +429,7 @@ def compute_ltv_by_product(df_todos: pd.DataFrame) -> dict:
 
 # ── Experience Top ────────────────────────────────────────────────────────────
 
-def compute_experience_top(df_todos: pd.DataFrame, top_n: int = 50) -> list:
+def compute_experience_top(df_todos: pd.DataFrame, top_n: int = 50, nome_map: dict = None) -> list:
     """Top participantes de eventos Experience (comprou em 2+ edições)."""
     if df_todos.empty:
         return []
@@ -422,6 +447,7 @@ def compute_experience_top(df_todos: pd.DataFrame, top_n: int = 50) -> list:
         eventos = grp['Nome do Produto'].dropna().unique().tolist()
         records.append({
             'email':      email,
+            'nome':       (nome_map or {}).get(email, email),
             'n_eventos':  len(eventos),
             'eventos':    eventos,
             'total_pago': round(float(grp['fat_liq'].sum()), 2),
@@ -470,13 +496,23 @@ def get_clientes() -> dict:
         df_base = _add_fat_liq(df_base)
         df_base = _add_email_norm(df_base)
 
+    # nome_map: email_norm → nome em Title Case (da coluna Nome em df_todos)
+    nome_map = _resolve_names(df_todos) if not df_todos.empty else {}
+
+    # assin_emails: emails que já tiveram subscriber code (assinantes)
+    df_assin_raw = pd.DataFrame(fetched.get('assin', []))
+    assin_emails: set = set()
+    if not df_assin_raw.empty and 'Email' in df_assin_raw.columns:
+        assin_emails = set(df_assin_raw['Email'].dropna().str.lower().str.strip().unique())
+
     # ── Análises ─────────────────────────────────────────────────────────────
     turma_entries   = build_turma_entries(df_raiz)
     cross_turma     = compute_cross_turma(turma_entries)
     rfm             = compute_rfm(turma_entries, df_todos)
-    top_renovadores = compute_top_renovadores(turma_entries, df_base=df_base, top_n=50)
-    ltv_ranking     = compute_ltv_ranking(df_todos, top_n=50)
-    experience_top  = compute_experience_top(df_todos, top_n=50)
+    top_renovadores = compute_top_renovadores(turma_entries, df_base=df_base, top_n=50,
+                                              nome_map=nome_map, assin_emails=assin_emails)
+    ltv_ranking     = compute_ltv_ranking(df_todos, top_n=50, nome_map=nome_map)
+    experience_top  = compute_experience_top(df_todos, top_n=50, nome_map=nome_map)
     ltv_by_product  = compute_ltv_by_product(df_todos)
 
     # ── KPIs ─────────────────────────────────────────────────────────────────

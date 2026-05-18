@@ -140,7 +140,7 @@ def fetch_all_approved_by_email(year: int = 2022) -> list[dict]:
     """Todas as transações aprovadas desde year, com Email. Exclui Mentoria R100."""
     sb = get_supabase()
     cols = ",".join([
-        '"Email"', '"Nome do Produto"', '"Recorrência"', '"Status"',
+        '"Email"', '"Nome"', '"Nome do Produto"', '"Recorrência"', '"Status"',
         '"Data de Venda"', '"Faturamento líquido"', '"Preço Total Convertido"',
         '"Preço Total"', '"Moeda de recebimento"', '"Taxa de Câmbio Real"',
         '"Taxa de Câmbio do valor recebido"', '"Valor que você recebeu convertido"',

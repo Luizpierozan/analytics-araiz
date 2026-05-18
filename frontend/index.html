@@ -379,15 +379,16 @@
             <!-- Top Renovadores -->
             <div class="table-container mt-2">
                 <h3>Top 50 Renovadores — Maior Histórico de Turmas</h3>
-                <table class="modern-table">
+                <table class="modern-table sortable-table" id="renovadoresTable">
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Email</th>
+                            <th class="sortable">Cliente</th>
                             <th>Turmas</th>
-                            <th>Nº Turmas</th>
-                            <th>Período ativo</th>
-                            <th>Total pago</th>
+                            <th class="sortable" data-type="number">Nº Turmas</th>
+                            <th class="sortable">Período ativo</th>
+                            <th class="sortable" data-type="number">Total pago</th>
+                            <th class="sortable">Assinante</th>
                         </tr>
                     </thead>
                     <tbody id="renovadoresTbody"></tbody>
@@ -397,14 +398,14 @@
             <!-- LTV Ranking -->
             <div class="table-container mt-2">
                 <h3>Top 50 — Lifetime Value (todos os produtos exceto Mentoria)</h3>
-                <table class="modern-table">
+                <table class="modern-table sortable-table" id="ltvTable">
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Email</th>
-                            <th>LTV Total</th>
+                            <th class="sortable">Cliente</th>
+                            <th class="sortable" data-type="number">LTV Total</th>
                             <th>Produtos</th>
-                            <th>Período</th>
+                            <th class="sortable">Período</th>
                         </tr>
                     </thead>
                     <tbody id="ltvTbody"></tbody>
@@ -414,13 +415,13 @@
             <!-- Experience Top -->
             <div class="table-container mt-2">
                 <h3>Fãs do Experience — Participou em 2+ edições</h3>
-                <table class="modern-table">
+                <table class="modern-table sortable-table" id="experienceTable">
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Email</th>
-                            <th>Edições</th>
-                            <th>Total pago</th>
+                            <th class="sortable">Cliente</th>
+                            <th class="sortable" data-type="number">Edições</th>
+                            <th class="sortable" data-type="number">Total pago</th>
                         </tr>
                     </thead>
                     <tbody id="experienceTbody"></tbody>
