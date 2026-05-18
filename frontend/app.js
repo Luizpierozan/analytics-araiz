@@ -701,14 +701,23 @@ function renderProjecoes(data) {
             const ratioFmt = tm.ratio != null ? tm.ratio.toFixed(2) + 'x' : isFuturo ? '<em style="color:var(--secondary)">projetado</em>' : '—';
             const pre4mFmt = tm.pre_4m != null ? formatCurrency(tm.pre_4m) : isFuturo ? formatCurrency(data.proj_turmas?.t9?.pre_4m_real ?? 0) : '—';
             const receitaFmt = tm.receita != null ? formatCurrency(tm.receita) : isFuturo ? '<em style="color:var(--text-muted)">Não realizado</em>' : '—';
-            const tipoBadge = tm.tipo === 'impar'
-                ? `<span style="background:#EEF2FF;color:#4338CA;padding:2px 8px;border-radius:999px;font-size:0.75rem;font-weight:600">Ímpar</span>`
-                : `<span style="background:#F0FDF4;color:#166534;padding:2px 8px;border-radius:999px;font-size:0.75rem;font-weight:600">Par</span>`;
+            const finalFmt = tm.final
+                ? tm.final.replace(/^(\d{4})-(\d{2})$/, (_, y, m) => {
+                    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+                    return `${meses[parseInt(m)-1]}/${y}`;
+                  })
+                : '—';
+            const aberturaFmt = tm.abertura
+                ? tm.abertura.replace(/^(\d{4})-(\d{2})$/, (_, y, m) => {
+                    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+                    return `${meses[parseInt(m)-1]}/${y}`;
+                  })
+                : tm.abertura;
             const rowStyle = isFuturo ? 'opacity:0.65;font-style:italic' : '';
             turmasTbody.innerHTML += `<tr style="${rowStyle}">
                 <td><strong>T${tm.id}</strong>${isFuturo ? ' <span style="font-size:0.7rem;color:var(--secondary);font-style:normal;font-weight:600">PROJETADA</span>' : ''}</td>
-                <td>${tm.abertura}</td>
-                <td>${tipoBadge}</td>
+                <td>${aberturaFmt}</td>
+                <td>${finalFmt}</td>
                 <td>${receitaFmt}</td>
                 <td>${pre4mFmt}</td>
                 <td style="font-weight:600;color:${isFuturo ? 'var(--text-muted)' : 'var(--secondary)'}">${ratioFmt}</td>

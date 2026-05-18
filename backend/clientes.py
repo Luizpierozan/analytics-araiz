@@ -13,7 +13,7 @@ import time
 import pandas as pd
 from database import fetch_raiz_enrollments, fetch_assinantes, fetch_all_approved_by_email
 from analise_avancada import compute_net_revenue
-from projecoes import TURMA_COHORTS
+from projecoes import TURMA_COHORTS, _TURMA_JANELAS
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -47,18 +47,6 @@ def _add_email_norm(df: pd.DataFrame) -> pd.DataFrame:
     df['email_norm'] = df['Email'].str.lower().str.strip()
     return df
 
-
-_TURMA_JANELAS = [
-    (1, '2021-08-01', '2022-05-30'),
-    (2, '2022-05-31', '2022-09-06'),
-    (3, '2022-09-07', '2023-06-19'),
-    (4, '2023-10-01', '2023-12-09'),
-    (5, '2023-12-10', '2024-07-24'),
-    (6, '2024-09-01', '2025-04-04'),
-    (7, '2025-04-05', '2025-08-21'),
-    (8, '2025-09-20', '2026-02-01'),
-    (9, '2026-02-02', '2026-12-31'),
-]
 
 def _assign_turma(purchase_date: pd.Timestamp) -> int | None:
     """Atribui turma pela janela de vendas oficial (comparação por data, sem hora)."""

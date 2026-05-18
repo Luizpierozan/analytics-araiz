@@ -18,16 +18,30 @@ from analise_avancada import compute_net_revenue, clean_currency
 
 LIMIAR_RENOVACAO = 4200.0  # preço líquido abaixo disso = renovação
 
-# Calendário oficial de turmas (id, YYYY-MM, tipo)
+# Janelas exatas de vendas por turma (início e fim inclusive, comparação por data)
+# Fonte única de verdade — usada em clientes.py e projecoes.py
+_TURMA_JANELAS = [
+    (1, '2021-08-01', '2022-05-30'),
+    (2, '2022-05-31', '2022-09-06'),
+    (3, '2022-09-07', '2023-06-19'),
+    (4, '2023-10-01', '2023-12-09'),
+    (5, '2023-12-10', '2024-07-24'),
+    (6, '2024-09-01', '2025-04-04'),
+    (7, '2025-04-05', '2025-08-21'),
+    (8, '2025-09-20', '2026-02-01'),
+    (9, '2026-02-02', '2026-12-31'),
+]
+
+# Calendário oficial de turmas (id, abertura=mês de lançamento, final=último dia da janela)
 # Turma 2 excluída do cálculo de ratio/sazonalidade — 2022 atípico
 TURMA_SCHEDULE = [
-    {"id": 3, "abertura": "2023-05", "tipo": "impar"},
-    {"id": 4, "abertura": "2023-10", "tipo": "par"},
-    {"id": 5, "abertura": "2024-05", "tipo": "impar"},
-    {"id": 6, "abertura": "2024-09", "tipo": "par"},
-    {"id": 7, "abertura": "2025-04", "tipo": "impar"},
-    {"id": 8, "abertura": "2025-09", "tipo": "par"},
-    {"id": 9, "abertura": "2026-05", "tipo": "impar"},   # a projetar
+    {"id": 3, "abertura": "2023-05", "final": "2023-06", "tipo": "impar"},
+    {"id": 4, "abertura": "2023-10", "final": "2023-12", "tipo": "par"},
+    {"id": 5, "abertura": "2024-05", "final": "2024-07", "tipo": "impar"},
+    {"id": 6, "abertura": "2024-09", "final": "2025-04", "tipo": "par"},
+    {"id": 7, "abertura": "2025-04", "final": "2025-08", "tipo": "impar"},
+    {"id": 8, "abertura": "2025-09", "final": "2026-02", "tipo": "par"},
+    {"id": 9, "abertura": "2026-05", "final": "2026-12", "tipo": "impar"},   # a projetar
 ]
 
 # Para análise de cohort por turma, T1 é a turma inaugural (Yampi, Ago/2021)
@@ -307,18 +321,16 @@ def compute_cohorts(df: pd.DataFrame) -> list[dict]:
 # ── Cohort por Turma ─────────────────────────────────────────────────────────
 
 def _assign_turma_cohort(first_date: pd.Timestamp) -> dict | None:
-    """
-    Opção A: atribui à turma mais recente que abriu ANTES ou NO mesmo mês da 1ª compra.
-    TURMA_COHORTS deve estar em ordem cronológica crescente.
-    """
-    assigned = None
-    for t in TURMA_COHORTS:
-        t_date = pd.Timestamp(t['abertura'] + '-01')
-        if first_date >= t_date:
-            assigned = t
-        else:
-            break
-    return assigned
+    """Atribui turma pela janela exata de vendas (comparação por data, sem hora)."""
+    if pd.isna(first_date):
+        return None
+    d = first_date.date()
+    for tid, inicio, fim in _TURMA_JANELAS:
+        if pd.Timestamp(inicio).date() <= d <= pd.Timestamp(fim).date():
+            for t in TURMA_COHORTS:
+                if t['id'] == tid:
+                    return t
+    return None
 
 
 def compute_cohorts_por_turma(df_assin: pd.DataFrame, df_raiz: pd.DataFrame) -> list[dict]:
@@ -626,13 +638,13 @@ def compute_historico_turmas(monthly: pd.Series) -> list[dict]:
         # Turma futura — sem dados ainda
         if period >= hoje:
             resultado.append({
-                "id":           t["id"],
-                "abertura":     t["abertura"],
-                "tipo":         t["tipo"],
-                "receita":      None,
-                "pre_4m":       None,
-                "ratio":        None,
-                "status":       "futuro",
+                "id":       t["id"],
+                "abertura": t["abertura"],
+                "final":    t.get("final", ""),
+                "receita":  None,
+                "pre_4m":   None,
+                "ratio":    None,
+                "status":   "futuro",
             })
             continue
 
@@ -642,7 +654,7 @@ def compute_historico_turmas(monthly: pd.Series) -> list[dict]:
         resultado.append({
             "id":       t["id"],
             "abertura": t["abertura"],
-            "tipo":     t["tipo"],
+            "final":    t.get("final", ""),
             "receita":  round(receita, 2),
             "pre_4m":   round(pre_4m, 2),
             "ratio":    round(receita / pre_4m, 4) if pre_4m > 0 else None,
