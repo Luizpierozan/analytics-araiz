@@ -273,19 +273,42 @@ def compute_rfm(turma_entries: dict, df_todos: pd.DataFrame) -> dict:
 
 # ── Top Renovadores ───────────────────────────────────────────────────────────
 
-def compute_top_renovadores(turma_entries: dict, top_n: int = 100) -> list:
-    """Top N alunos por nº de turmas participadas (somente quem renovou ≥1x)."""
+def compute_top_renovadores(
+    turma_entries: dict,
+    df_base: pd.DataFrame = None,
+    top_n: int = 100,
+) -> list:
+    """Top N alunos por nº de turmas participadas (somente quem renovou ≥1x).
+
+    total_pago: soma de TODOS os pagamentos do produto base (todas as Recorrências),
+    obtida de df_base (df_todos filtrado ao curso base + status Completo/Aprovado).
+    Se df_base não for fornecido, usa apenas a 1ª compra por turma (fallback).
+    Isso garante que assinantes (Rec=1..12) tenham o total real, não só Rec=1.
+    """
+    # Pré-computa total real por email a partir de todos os pagamentos
+    total_por_email: dict[str, float] = {}
+    if df_base is not None and not df_base.empty:
+        df_ok = df_base[df_base['Status'].isin(['Completo', 'Aprovado'])].copy()
+        if 'fat_liq' not in df_ok.columns:
+            df_ok = _add_fat_liq(df_ok)
+        if 'email_norm' not in df_ok.columns:
+            df_ok = _add_email_norm(df_ok)
+        total_por_email = df_ok.groupby('email_norm')['fat_liq'].sum().to_dict()
+
     records = []
     for email, entries in turma_entries.items():
         if len(entries) < 2:
             continue
+        total = total_por_email.get(email) if total_por_email else None
+        if total is None:
+            total = sum(e['fat_liq'] for e in entries)   # fallback
         records.append({
-            'email':      email,
-            'n_turmas':   len(entries),
-            'turmas':     [f"T{e['turma_id']}" for e in entries],
-            'total_pago': round(sum(e['fat_liq'] for e in entries), 2),
-            'primeiro':   entries[0]['date'].strftime('%m/%Y'),
-            'ultimo':     entries[-1]['date'].strftime('%m/%Y'),
+            'email':       email,
+            'n_turmas':    len(entries),
+            'turmas':      [f"T{e['turma_id']}" for e in entries],
+            'total_pago':  round(total, 2),
+            'primeiro':    entries[0]['date'].strftime('%m/%Y'),
+            'ultimo':      entries[-1]['date'].strftime('%m/%Y'),
             'meses_ativo': round(
                 (entries[-1]['date'] - entries[0]['date']).days / 30.44, 1
             ),
@@ -440,11 +463,18 @@ def get_clientes() -> dict:
     if not df_todos.empty:
         df_todos = _parse_dt(df_todos)
 
+    # df_base: apenas produto base, todas as recorrências — usado para total_pago real
+    df_base = pd.DataFrame()
+    if not df_todos.empty:
+        df_base = df_todos[df_todos['Nome do Produto'].isin(NOMES_RAIZ_CURSO)].copy()
+        df_base = _add_fat_liq(df_base)
+        df_base = _add_email_norm(df_base)
+
     # ── Análises ─────────────────────────────────────────────────────────────
     turma_entries   = build_turma_entries(df_raiz)
     cross_turma     = compute_cross_turma(turma_entries)
     rfm             = compute_rfm(turma_entries, df_todos)
-    top_renovadores = compute_top_renovadores(turma_entries, top_n=50)
+    top_renovadores = compute_top_renovadores(turma_entries, df_base=df_base, top_n=50)
     ltv_ranking     = compute_ltv_ranking(df_todos, top_n=50)
     experience_top  = compute_experience_top(df_todos, top_n=50)
     ltv_by_product  = compute_ltv_by_product(df_todos)
