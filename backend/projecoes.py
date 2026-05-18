@@ -23,7 +23,7 @@ LIMIAR_RENOVACAO = 4200.0  # preço líquido abaixo disso = renovação
 _TURMA_JANELAS = [
     (1, '2021-08-01', '2021-09-30'),
     (2, '2022-05-01', '2022-09-06'),
-    (3, '2022-09-07', '2023-06-19'),
+    (3, '2023-04-01', '2023-06-19'),   # encurtada: Set/22–Mar/23 tinha zero vendas
     (4, '2023-10-01', '2023-12-09'),
     (5, '2023-12-10', '2024-07-24'),
     (6, '2024-09-01', '2025-04-04'),
@@ -32,14 +32,14 @@ _TURMA_JANELAS = [
     (9, '2026-02-02', '2026-12-31'),
 ]
 
-# Calendário oficial de turmas (id, abertura=mês de lançamento, final=último dia da janela)
+# Calendário oficial de turmas (id, abertura=mês de lançamento real, final=último mês da janela)
 # Turma 2 excluída do cálculo de ratio/sazonalidade — 2022 atípico
 TURMA_SCHEDULE = [
     {"id": 3, "abertura": "2023-05", "final": "2023-06", "tipo": "impar"},
     {"id": 4, "abertura": "2023-10", "final": "2023-12", "tipo": "par"},
     {"id": 5, "abertura": "2024-05", "final": "2024-07", "tipo": "impar"},
     {"id": 6, "abertura": "2024-09", "final": "2025-04", "tipo": "par"},
-    {"id": 7, "abertura": "2025-04", "final": "2025-08", "tipo": "impar"},
+    {"id": 7, "abertura": "2025-05", "final": "2025-08", "tipo": "impar"},  # pico real: Mai/25
     {"id": 8, "abertura": "2025-09", "final": "2026-02", "tipo": "par"},
     {"id": 9, "abertura": "2026-05", "final": "2026-12", "tipo": "impar"},   # a projetar
 ]
@@ -52,7 +52,7 @@ TURMA_COHORTS = [
     {"id": 4, "abertura": "2023-10"},
     {"id": 5, "abertura": "2024-05"},
     {"id": 6, "abertura": "2024-09"},
-    {"id": 7, "abertura": "2025-04"},
+    {"id": 7, "abertura": "2025-05"},  # pico real: Mai/25
     {"id": 8, "abertura": "2025-09"},
     {"id": 9, "abertura": "2026-05"},
 ]
