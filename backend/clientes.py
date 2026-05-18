@@ -48,18 +48,27 @@ def _add_email_norm(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+_TURMA_JANELAS = [
+    (1, '2021-08-01', '2022-05-30'),
+    (2, '2022-05-31', '2022-09-06'),
+    (3, '2022-09-07', '2023-06-19'),
+    (4, '2023-10-01', '2023-12-09'),
+    (5, '2023-12-10', '2024-07-24'),
+    (6, '2024-09-01', '2025-04-04'),
+    (7, '2025-04-05', '2025-08-21'),
+    (8, '2025-09-20', '2026-02-01'),
+    (9, '2026-02-02', '2026-12-31'),
+]
+
 def _assign_turma(purchase_date: pd.Timestamp) -> int | None:
-    """Turma mais recente aberta antes de purchase_date (Opção A)."""
+    """Atribui turma pela janela de vendas oficial (comparação por data, sem hora)."""
     if pd.isna(purchase_date):
         return None
-    assigned = None
-    for t in TURMA_COHORTS:
-        t_open = pd.Timestamp(t['abertura'] + '-01')
-        if purchase_date >= t_open:
-            assigned = t['id']
-        else:
-            break
-    return assigned
+    d = purchase_date.date()
+    for tid, inicio, fim in _TURMA_JANELAS:
+        if pd.Timestamp(inicio).date() <= d <= pd.Timestamp(fim).date():
+            return tid
+    return None
 
 
 # ── Turma entries por email ───────────────────────────────────────────────────
