@@ -30,8 +30,9 @@ TURMA_SCHEDULE = [
     {"id": 9, "abertura": "2026-05", "tipo": "impar"},   # a projetar
 ]
 
-# Para análise de cohort por turma, T2 é incluída (clientes reais)
+# Para análise de cohort por turma, T1 é a turma inaugural (Yampi, Ago/2021)
 TURMA_COHORTS = [
+    {"id": 1, "abertura": "2021-08"},
     {"id": 2, "abertura": "2022-06"},
     {"id": 3, "abertura": "2023-05"},
     {"id": 4, "abertura": "2023-10"},

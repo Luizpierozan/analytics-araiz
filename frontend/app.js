@@ -896,6 +896,8 @@ if (savedTheme) applyTheme(savedTheme === 'dark');
 const modalHistorico  = document.getElementById('modalHistorico');
 const modalConfirm    = document.getElementById('modalConfirm');
 let _pendingRevertId  = null;
+let _uploadsCache     = null;   // {data, ts}
+const _UPLOADS_TTL    = 30000;  // 30s
 
 document.getElementById('btnHistorico').addEventListener('click', () => {
     modalHistorico.style.display = 'flex';
@@ -929,6 +931,7 @@ document.getElementById('btnConfirmReverter').addEventListener('click', async ()
         if (!data.sucesso) throw new Error(data.erro || 'Erro ao reverter');
         alert(`Importação revertida com sucesso!\n${data.deletadas} transações removidas.`);
         // Recarrega dados e histórico
+        _uploadsCache = null;   // força recarregar após rollback
         loadAllData(dateStart.value, dateEnd.value);
         loadUploadHistory();
         clientesLoaded = false;
@@ -943,6 +946,13 @@ async function loadUploadHistory() {
     const loading = document.getElementById('historicoLoading');
     const table   = document.getElementById('historicoTable');
     const vazio   = document.getElementById('historicoVazio');
+
+    // Usa cache se ainda válido
+    if (_uploadsCache && (Date.now() - _uploadsCache.ts) < _UPLOADS_TTL) {
+        renderUploadHistory(_uploadsCache.data);
+        return;
+    }
+
     loading.style.display = 'block';
     table.style.display   = 'none';
     vazio.style.display   = 'none';
@@ -950,48 +960,56 @@ async function loadUploadHistory() {
     try {
         const res  = await fetch('/api/uploads');
         const data = await res.json();
+        _uploadsCache = { data, ts: Date.now() };
         if (!data.sucesso) throw new Error(data.erro);
-
-        loading.style.display = 'none';
-        if (!data.uploads.length) {
-            vazio.style.display = 'block';
-            return;
-        }
-
-        const tbody = document.getElementById('historicotTbody');
-        tbody.innerHTML = data.uploads.map(u => {
-            const dt = new Date(u.criado_em).toLocaleString('pt-BR', {
-                day:'2-digit', month:'2-digit', year:'numeric',
-                hour:'2-digit', minute:'2-digit'
-            });
-            const isRevertido = u.arquivo.startsWith('[REVERTIDO]');
-            const nomeArquivo = u.arquivo.replace('[REVERTIDO] ', '');
-            const statusBadge = isRevertido
-                ? `<span style="font-size:10px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;margin-left:4px">revertido</span>`
-                : '';
-            const btnReverter = (!isRevertido && u.revertivel)
-                ? `<button onclick="confirmarRevert(${u.id},'${nomeArquivo.replace(/'/g,"\\'")}',${u.linhas})"
-                     style="padding:4px 12px;border-radius:5px;border:none;background:#dc2626;color:#fff;cursor:pointer;font-size:12px;font-weight:600">
-                     Reverter
-                   </button>`
-                : `<span style="font-size:11px;color:#9ca3af">${isRevertido ? '—' : 'sem chaves'}</span>`;
-            return `<tr style="${isRevertido ? 'opacity:0.5' : ''}">
-                <td style="color:#6b7280;font-size:12px">#${u.id}</td>
-                <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nomeArquivo}">
-                    ${nomeArquivo}${statusBadge}
-                </td>
-                <td style="font-size:12px">${u.usuario}</td>
-                <td style="text-align:center;font-weight:600">${(u.linhas||0).toLocaleString('pt-BR')}</td>
-                <td style="font-size:12px;white-space:nowrap">${dt}</td>
-                <td style="text-align:center">${btnReverter}</td>
-            </tr>`;
-        }).join('');
-
-        table.style.display = 'table';
+        renderUploadHistory(data);
     } catch(e) {
         loading.textContent = 'Erro ao carregar histórico.';
         console.error(e);
     }
+}
+
+function renderUploadHistory(data) {
+    const loading = document.getElementById('historicoLoading');
+    const table   = document.getElementById('historicoTable');
+    const vazio   = document.getElementById('historicoVazio');
+    loading.style.display = 'none';
+
+    if (!data.uploads || !data.uploads.length) {
+        vazio.style.display = 'block';
+        return;
+    }
+
+    const tbody = document.getElementById('historicotTbody');
+    tbody.innerHTML = data.uploads.map(u => {
+        const dt = new Date(u.criado_em).toLocaleString('pt-BR', {
+            day:'2-digit', month:'2-digit', year:'numeric',
+            hour:'2-digit', minute:'2-digit'
+        });
+        const isRevertido = u.arquivo.startsWith('[REVERTIDO]');
+        const nomeArquivo = u.arquivo.replace('[REVERTIDO] ', '');
+        const statusBadge = isRevertido
+            ? `<span style="font-size:10px;background:var(--bg-color);color:var(--text-muted);border-radius:4px;padding:1px 6px;margin-left:6px">revertido</span>`
+            : '';
+        const btnReverter = (!isRevertido && u.revertivel)
+            ? `<button onclick="confirmarRevert(${u.id},'${nomeArquivo.replace(/'/g,"\\'")}',${u.linhas})"
+                 style="padding:5px 14px;border-radius:6px;border:none;background:#dc2626;color:#fff;cursor:pointer;font-size:12px;font-weight:600">
+                 Reverter
+               </button>`
+            : `<span style="font-size:11px;color:var(--text-muted)">${isRevertido ? '—' : 'sem chaves'}</span>`;
+        return `<tr style="${isRevertido ? 'opacity:0.45' : ''}">
+            <td style="color:var(--text-muted);font-size:12px">#${u.id}</td>
+            <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nomeArquivo}">
+                ${nomeArquivo}${statusBadge}
+            </td>
+            <td style="font-size:12px">${u.usuario}</td>
+            <td style="text-align:center;font-weight:600">${(u.linhas||0).toLocaleString('pt-BR')}</td>
+            <td style="font-size:12px;white-space:nowrap">${dt}</td>
+            <td style="text-align:center">${btnReverter}</td>
+        </tr>`;
+    }).join('');
+
+    table.style.display = 'table';
 }
 
 function confirmarRevert(id, arquivo, linhas) {
