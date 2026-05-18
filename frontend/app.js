@@ -891,5 +891,115 @@ btnTheme.addEventListener('click', () => {
 const savedTheme = localStorage.getItem('theme');
 if (savedTheme) applyTheme(savedTheme === 'dark');
 
+// ── Histórico de Importações ─────────────────────────────────────────────────
+
+const modalHistorico  = document.getElementById('modalHistorico');
+const modalConfirm    = document.getElementById('modalConfirm');
+let _pendingRevertId  = null;
+
+document.getElementById('btnHistorico').addEventListener('click', () => {
+    modalHistorico.style.display = 'flex';
+    loadUploadHistory();
+});
+document.getElementById('btnFecharHistorico').addEventListener('click', () => {
+    modalHistorico.style.display = 'none';
+});
+modalHistorico.addEventListener('click', e => {
+    if (e.target === modalHistorico) modalHistorico.style.display = 'none';
+});
+
+document.getElementById('btnConfirmCancelar').addEventListener('click', () => {
+    modalConfirm.style.display = 'none';
+    _pendingRevertId = null;
+});
+modalConfirm.addEventListener('click', e => {
+    if (e.target === modalConfirm) { modalConfirm.style.display = 'none'; _pendingRevertId = null; }
+});
+
+document.getElementById('btnConfirmReverter').addEventListener('click', async () => {
+    if (!_pendingRevertId) return;
+    const id = _pendingRevertId;
+    _pendingRevertId = null;
+    modalConfirm.style.display = 'none';
+
+    showLoading('Revertendo importação...');
+    try {
+        const res  = await fetch(`/api/uploads/${id}/reverter`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!data.sucesso) throw new Error(data.erro || 'Erro ao reverter');
+        alert(`Importação revertida com sucesso!\n${data.deletadas} transações removidas.`);
+        // Recarrega dados e histórico
+        loadAllData(dateStart.value, dateEnd.value);
+        loadUploadHistory();
+        clientesLoaded = false;
+    } catch(e) {
+        alert('Erro ao reverter: ' + e.message);
+    } finally {
+        hideLoading();
+    }
+});
+
+async function loadUploadHistory() {
+    const loading = document.getElementById('historicoLoading');
+    const table   = document.getElementById('historicoTable');
+    const vazio   = document.getElementById('historicoVazio');
+    loading.style.display = 'block';
+    table.style.display   = 'none';
+    vazio.style.display   = 'none';
+
+    try {
+        const res  = await fetch('/api/uploads');
+        const data = await res.json();
+        if (!data.sucesso) throw new Error(data.erro);
+
+        loading.style.display = 'none';
+        if (!data.uploads.length) {
+            vazio.style.display = 'block';
+            return;
+        }
+
+        const tbody = document.getElementById('historicotTbody');
+        tbody.innerHTML = data.uploads.map(u => {
+            const dt = new Date(u.criado_em).toLocaleString('pt-BR', {
+                day:'2-digit', month:'2-digit', year:'numeric',
+                hour:'2-digit', minute:'2-digit'
+            });
+            const isRevertido = u.arquivo.startsWith('[REVERTIDO]');
+            const nomeArquivo = u.arquivo.replace('[REVERTIDO] ', '');
+            const statusBadge = isRevertido
+                ? `<span style="font-size:10px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;margin-left:4px">revertido</span>`
+                : '';
+            const btnReverter = (!isRevertido && u.revertivel)
+                ? `<button onclick="confirmarRevert(${u.id},'${nomeArquivo.replace(/'/g,"\\'")}',${u.linhas})"
+                     style="padding:4px 12px;border-radius:5px;border:none;background:#dc2626;color:#fff;cursor:pointer;font-size:12px;font-weight:600">
+                     Reverter
+                   </button>`
+                : `<span style="font-size:11px;color:#9ca3af">${isRevertido ? '—' : 'sem chaves'}</span>`;
+            return `<tr style="${isRevertido ? 'opacity:0.5' : ''}">
+                <td style="color:#6b7280;font-size:12px">#${u.id}</td>
+                <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nomeArquivo}">
+                    ${nomeArquivo}${statusBadge}
+                </td>
+                <td style="font-size:12px">${u.usuario}</td>
+                <td style="text-align:center;font-weight:600">${(u.linhas||0).toLocaleString('pt-BR')}</td>
+                <td style="font-size:12px;white-space:nowrap">${dt}</td>
+                <td style="text-align:center">${btnReverter}</td>
+            </tr>`;
+        }).join('');
+
+        table.style.display = 'table';
+    } catch(e) {
+        loading.textContent = 'Erro ao carregar histórico.';
+        console.error(e);
+    }
+}
+
+function confirmarRevert(id, arquivo, linhas) {
+    _pendingRevertId = id;
+    document.getElementById('confirmArquivo').textContent =
+        `${arquivo}  —  ${linhas.toLocaleString('pt-BR')} linhas`;
+    modalConfirm.style.display = 'flex';
+}
+
 // Init
 checkAuth().then(user => { if (user) loadAllData(); });

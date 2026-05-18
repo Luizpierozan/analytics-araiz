@@ -20,7 +20,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -80,6 +80,85 @@ async def projecoes(user: dict = Depends(get_current_user)):
 @app.get("/api/clientes")
 async def clientes(user: dict = Depends(get_current_user)):
     return get_clientes()
+
+
+@app.get("/api/uploads")
+async def list_uploads(user: dict = Depends(require_superadmin)):
+    """Lista histórico de importações com metadados para rollback."""
+    from database import get_supabase
+    import json
+    sb = get_supabase()
+    res = sb.table('audit_uploads').select('id,usuario,arquivo,linhas,chaves,criado_em').order('criado_em', desc=True).limit(50).execute()
+    items = []
+    for r in (res.data or []):
+        chaves = r.get('chaves')
+        n_chaves = 0
+        if chaves:
+            try:
+                parsed = json.loads(chaves) if isinstance(chaves, str) else chaves
+                n_chaves = len(parsed)
+            except Exception:
+                n_chaves = 0
+        items.append({
+            'id':        r['id'],
+            'usuario':   r['usuario'],
+            'arquivo':   r['arquivo'],
+            'linhas':    r['linhas'],
+            'n_chaves':  n_chaves,
+            'revertivel': n_chaves > 0,
+            'criado_em': r['criado_em'],
+        })
+    return {'sucesso': True, 'uploads': items}
+
+
+@app.delete("/api/uploads/{upload_id}/reverter")
+async def reverter_upload(upload_id: int, user: dict = Depends(require_superadmin)):
+    """Reverte um upload deletando todas as transações daquele import."""
+    from database import get_supabase
+    import json
+    sb = get_supabase()
+
+    # Buscar registro de auditoria
+    res = sb.table('audit_uploads').select('id,arquivo,linhas,chaves').eq('id', upload_id).execute()
+    if not res.data:
+        return JSONResponse({'sucesso': False, 'erro': 'Upload não encontrado'}, status_code=404)
+
+    registro = res.data[0]
+    chaves_raw = registro.get('chaves')
+    if not chaves_raw:
+        return JSONResponse({'sucesso': False, 'erro': 'Este upload não possui chaves salvas — não é possível reverter automaticamente'}, status_code=400)
+
+    try:
+        chaves = json.loads(chaves_raw) if isinstance(chaves_raw, str) else chaves_raw
+    except Exception:
+        return JSONResponse({'sucesso': False, 'erro': 'Erro ao ler lista de chaves'}, status_code=500)
+
+    if not chaves:
+        return JSONResponse({'sucesso': False, 'erro': 'Lista de chaves vazia'}, status_code=400)
+
+    # Deletar em lotes de 100 (limite do PostgREST)
+    BATCH = 100
+    deletadas = 0
+    for i in range(0, len(chaves), BATCH):
+        lote = chaves[i:i+BATCH]
+        sb.table('transacoes').delete().in_('chave', lote).execute()
+        deletadas += len(lote)
+
+    # Marcar upload como revertido na auditoria
+    sb.table('audit_uploads').update({
+        'arquivo': f'[REVERTIDO] {registro["arquivo"]}',
+        'chaves':  None,
+    }).eq('id', upload_id).execute()
+
+    # Invalida caches
+    invalidate_cache()
+    invalidate_cache_clientes()
+
+    return {
+        'sucesso':   True,
+        'deletadas': deletadas,
+        'arquivo':   registro['arquivo'],
+    }
 
 
 @app.get("/api/inadimplencia")

@@ -61,17 +61,21 @@ def ingest_new_file(filepath, usuario: str = "sistema"):
         rows = df_new.to_dict(orient='records')
         BATCH = 200
         total = 0
+        chaves_inseridas = []
         for i in range(0, len(rows), BATCH):
             batch = [{k: _clean_val(v) for k, v in r.items() if _clean_val(v) is not None}
                      for r in rows[i:i+BATCH]]
             sb.table('transacoes').upsert(batch, on_conflict='chave').execute()
             total += len(batch)
+            chaves_inseridas.extend([r['chave'] for r in batch if 'chave' in r])
 
-        # Registrar auditoria
+        # Registrar auditoria com lista de chaves (permite rollback)
+        import json
         sb.table('audit_uploads').insert({
             "usuario": usuario,
             "arquivo": os.path.basename(filepath),
             "linhas":  total,
+            "chaves":  json.dumps(chaves_inseridas),
         }).execute()
 
         return total
