@@ -102,18 +102,24 @@ def fetch_approved_since(year: int = 2023) -> list[dict]:
 
 
 def fetch_raiz_enrollments() -> list[dict]:
-    """Busca todas as matrículas de 'A Raiz da Solução' (Recorrência 1 ou NaN).
+    """Busca matrículas do curso base 'A Raiz da Solução' (Recorrência 1 ou NaN).
 
-    Usado para calcular taxa de renovação por email + limiar de preço.
-    Retorna apenas colunas necessárias para essa análise.
+    Filtro de produto: apenas o curso principal — exclui Experience, PRO, Gravação.
+    Inclui 'A Raiz da Solução 2.0' para compatibilidade com possível renome na T9+.
+
+    Recorrência = 1   → primeiro pagamento de um ciclo de assinatura (nova entrada ou renovação)
+    Recorrência nula  → compra avulsa / parcelada sem código de assinante
+
+    Usado para: taxa de renovação, cohort por turma, cross-turma matrix.
     """
-    sb = get_supabase()
+    sb   = get_supabase()
     cols = '"Email","Nome do Produto","Recorrência","Status","Data de Venda","Preço Total Convertido","Faturamento líquido","Moeda de recebimento","Taxa de Câmbio Real","Taxa de Câmbio do valor recebido","Valor que você recebeu convertido"'
+    BASE_PRODUTOS = ['A Raiz da Solução', 'A Raiz da Solução 2.0']
 
-    # Recorrência == 1: primeiro pagamento de cada ciclo
+    # Recorrência == 1: primeiro pagamento de cada ciclo (nova entrada ou renovação)
     q1 = (sb.table("transacoes")
             .select(cols)
-            .ilike('"Nome do Produto"', '%raiz%')
+            .in_('"Nome do Produto"', BASE_PRODUTOS)
             .eq('"Recorrência"', 1)
             .in_("Status", ["Completo", "Aprovado"])
             .order('"Data de Venda"'))
@@ -121,7 +127,7 @@ def fetch_raiz_enrollments() -> list[dict]:
     # Recorrência nula: compras avulsas (parceladas sem assinatura formal)
     q2 = (sb.table("transacoes")
             .select(cols)
-            .ilike('"Nome do Produto"', '%raiz%')
+            .in_('"Nome do Produto"', BASE_PRODUTOS)
             .is_('"Recorrência"', 'null')
             .in_("Status", ["Completo", "Aprovado"])
             .order('"Data de Venda"'))

@@ -368,14 +368,16 @@ def compute_cohorts_por_turma(df_assin: pd.DataFrame, df_raiz: pd.DataFrame) -> 
     else:
         dfa['email_norm'] = ''
 
-    # ── Email → Turma (pela 1ª compra em df_raiz) ───────────────────────────
-    email_turma: dict[str, int] = {}
+    # ── Email → Turmas (todas as janelas onde o email tem Rec=1/null) ────────
+    # Um mesmo email pode aparecer em múltiplas turmas: entrada original + renovações.
+    # Ex: aluno que comprou em T3 e renovou em T6 conta nas duas turmas.
+    email_turmas: dict[str, set] = {}
     if not dfr.empty:
-        first_by_email = dfr.groupby('email_norm')['Data de Venda'].min()
-        for email, fd in first_by_email.items():
-            t = _assign_turma_cohort(fd)
+        for _, row in dfr.iterrows():
+            t = _assign_turma_cohort(row['Data de Venda'])
             if t:
-                email_turma[email] = t['id']
+                email = row['email_norm']
+                email_turmas.setdefault(email, set()).add(t['id'])
 
     # ── Código de assinante → Turma (pelo 1º pag. do código, Rec=1) ─────────
     rec1_assin = dfa[dfa['Recorrência'] == 1]
@@ -398,8 +400,8 @@ def compute_cohorts_por_turma(df_assin: pd.DataFrame, df_raiz: pd.DataFrame) -> 
 
         tid = turma['id']
 
-        # Emails que entraram nesta turma
-        emails_turma = {e for e, t_id in email_turma.items() if t_id == tid}
+        # Emails que entraram nesta turma (nova entrada ou renovação)
+        emails_turma = {e for e, t_ids in email_turmas.items() if tid in t_ids}
         if not emails_turma:
             continue
 
