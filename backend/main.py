@@ -1,8 +1,9 @@
-from fastapi import FastAPI, UploadFile, File, Depends
+from fastapi import FastAPI, UploadFile, File, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
-from auth import router as auth_router, get_current_user, require_superadmin
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from auth import router as auth_router, get_current_user, require_superadmin, decode_session_token
 from analise_avancada import ingest_new_file, get_dashboard_geral, get_inadimplencia
 from projecoes import get_projecoes, invalidate_cache
 from clientes import get_clientes, invalidate_cache as invalidate_cache_clientes
@@ -11,9 +12,26 @@ import os, tempfile
 
 load_dotenv()
 
+IS_PROD = os.getenv("ENVIRONMENT", "development") == "production"
+
 app = FastAPI()
 
-IS_PROD    = os.getenv("ENVIRONMENT", "development") == "production"
+# ── Middleware: protege index.html em produção ───────────────────────────────
+class FrontendAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Só aplica proteção em produção e só para a rota raiz / index.html
+        if IS_PROD and request.url.path in ("/", "/index.html"):
+            token = request.cookies.get("session")
+            if not token:
+                return RedirectResponse(url="/login.html", status_code=302)
+            try:
+                decode_session_token(token)
+            except Exception:
+                return RedirectResponse(url="/login.html", status_code=302)
+        return await call_next(request)
+
+app.add_middleware(FrontendAuthMiddleware)
+
 ALLOWED_ORIGINS = ["*"] if not IS_PROD else [os.getenv("BASE_URL", "")]
 
 app.add_middleware(
