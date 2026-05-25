@@ -13,7 +13,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 SECRET_KEY           = os.getenv("SECRET_KEY")
 ALLOWED_EMAILS       = [e.strip() for e in os.getenv("ALLOWED_EMAILS", "").split(",") if e.strip()]
 ADMIN_EMAILS         = [e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
-BASE_URL             = os.getenv("BASE_URL", "http://localhost:8000")
+BASE_URL             = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
 IS_PROD              = os.getenv("ENVIRONMENT", "development") == "production"
 
 SESSION_HOURS = 8
