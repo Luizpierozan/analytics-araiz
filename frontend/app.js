@@ -444,12 +444,17 @@ selectEvolucaoMetrica.addEventListener('change', () => {
 });
 
 function renderInadimplencia(data) {
-    document.getElementById('valDevedores').innerText = data.geral.total_inadimplentes;
-    document.getElementById('valTaxaInad').innerText = `${data.geral.taxa_inadimplencia.toFixed(1)}%`;
+    const g = data.geral;
+    document.getElementById('valDevedores').innerText        = g.total_inadimplentes ?? 0;
+    document.getElementById('valTaxaInad').innerText         = `${(g.taxa_inadimplencia ?? 0).toFixed(1)}%`;
+    document.getElementById('valEmAberto').innerText         = formatCurrency(g.valor_em_aberto ?? 0);
+    document.getElementById('valRecuperados').innerText      = g.total_recuperados ?? 0;
+    document.getElementById('valTaxaRecuperacao').innerText  = `${(g.taxa_recuperacao ?? 0).toFixed(1)}%`;
+    document.getElementById('valRecuperado').innerText       = formatCurrency(g.valor_recuperado ?? 0);
 
     // Aging Chart
     const ctx = document.getElementById('agingChart').getContext('2d');
-    if(agingChart) agingChart.destroy();
+    if (agingChart) agingChart.destroy();
     agingChart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -469,18 +474,31 @@ function renderInadimplencia(data) {
         }
     });
 
-    // Tabela
+    // Tabela devedores ativos
     const tbody = document.getElementById('devedoresTbody');
-    tbody.innerHTML = '';
-    data.lista.forEach(d => {
-        tbody.innerHTML += `<tr>
-            <td><span class="badge-danger">${d.dias} dias</span></td>
-            <td><strong>${d.nome}</strong><br><span style="font-size:11px;color:var(--text-muted)">${d.email}</span></td>
-            <td>${d.telefone || 'N/A'}</td>
-            <td>${d.produto}</td>
-            <td>${formatCurrency(d.valor)}</td>
-        </tr>`;
-    });
+    tbody.innerHTML = (data.lista || []).map(d => `<tr>
+        <td><span class="badge-danger">${d.dias} dias</span></td>
+        <td><strong>${d.nome}</strong><br><span style="font-size:11px;color:var(--text-muted)">${d.email}</span></td>
+        <td>${d.telefone || 'N/A'}</td>
+        <td>${d.produto}</td>
+        <td>${formatCurrency(d.valor)}</td>
+    </tr>`).join('');
+
+    // Tabela recuperados
+    const rec = data.lista_recuperados || [];
+    const secao = document.getElementById('secaoRecuperados');
+    if (rec.length > 0) {
+        secao.style.display = '';
+        document.getElementById('recuperadosTbody').innerHTML = rec.map(r => `<tr>
+            <td><strong>${r.nome}</strong><br><span style="font-size:11px;color:var(--text-muted)">${r.email}</span></td>
+            <td>${r.produto}</td>
+            <td style="text-align:center">${r.parcelas_recuperadas}</td>
+            <td style="color:var(--success);font-weight:600">${formatCurrency(r.valor_recuperado)}</td>
+            <td>${r.data_recuperacao}</td>
+        </tr>`).join('');
+    } else {
+        secao.style.display = 'none';
+    }
 }
 
 // ── Projeções ────────────────────────────────────────────────────────────────

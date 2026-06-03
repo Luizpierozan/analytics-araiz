@@ -431,27 +431,10 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
     if df_assin_col in df_atual_all.columns:
         df_assin_periodo = df_atual_all[
             df_atual_all[df_assin_col].notna() & (df_atual_all[df_assin_col] != '')
-        ]
-        cods_inad = set(df_assin_periodo[df_assin_periodo['Status'] == 'Atrasado'][df_assin_col].unique())
-        inad_exec["total"] = int(len(cods_inad))
-        valor_inad = 0.0
-        for cod in cods_inad:
-            atrasadas = df_assin_periodo[
-                (df_assin_periodo[df_assin_col] == cod) &
-                (df_assin_periodo['Status'] == 'Atrasado')
-            ]
-            if atrasadas.empty:
-                continue
-            ref   = atrasadas.iloc[0]
-            preco = clean_currency(ref.get('Preço Total', 0))
-            moeda = str(ref.get('Moeda de recebimento', 'BRL')).upper().strip()
-            if moeda not in ('BRL', 'REAL BRASILEIRO', ''):
-                tcr = clean_currency(ref.get('Taxa de Câmbio Real', 0))
-                tcv = clean_currency(ref.get('Taxa de Câmbio do valor recebido', 0))
-                if tcr > 0 and tcv > 0:
-                    preco = preco * tcr * tcv
-            valor_inad += preco * len(atrasadas)
-        inad_exec["valor"] = float(valor_inad)
+        ].copy()
+        _res = _inad_resolve(df_assin_periodo)
+        inad_exec["total"] = _res['total_inadimplentes']
+        inad_exec["valor"] = _res['valor_em_aberto']
 
     return {
         "sucesso": True,
@@ -504,6 +487,143 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
     }
 
 
+def _inad_resolve(df_assin: pd.DataFrame, df_extended: pd.DataFrame = None) -> dict:
+    """Resolve inadimplência: separa parcelas ativas de recuperadas.
+
+    Parâmetros:
+        df_assin:    DataFrame de transações do período (só assinantes).
+        df_extended: DataFrame opcional com transações APÓS o período (para checar
+                     recuperações ocorridas depois do fim do período).
+
+    Retorna dict com chaves:
+        total_inadimplentes, total_recuperados, taxa_inadimplencia, taxa_recuperacao,
+        valor_em_aberto, valor_recuperado, aging, lista_ativos, lista_recuperados.
+    """
+    COD = 'Código do assinante'
+    hoje = datetime.now()
+
+    cods_atrasados = set(
+        df_assin[df_assin['Status'] == 'Atrasado'][COD].unique()
+    )
+    assin_ativos_periodo = set(
+        df_assin[df_assin['Status'].isin(['Completo', 'Aprovado'])][COD].unique()
+    )
+
+    # DataFrame combinado para busca de recuperações
+    if df_extended is not None and not df_extended.empty:
+        df_full = pd.concat([df_assin, df_extended], ignore_index=True)
+    else:
+        df_full = df_assin
+
+    lista_ativos = []
+    lista_recuperados = []
+
+    for cod in cods_atrasados:
+        atrasadas = df_assin[(df_assin[COD] == cod) & (df_assin['Status'] == 'Atrasado')]
+        hist_cod  = df_assin[df_assin[COD] == cod]
+        ref_row   = hist_cod.iloc[-1]
+
+        completas_cod = df_full[
+            (df_full[COD] == cod) &
+            (df_full['Status'].isin(['Completo', 'Aprovado']))
+        ]
+
+        parcelas_ativas = []
+        parcelas_recuperadas = []
+
+        for _, linha in atrasadas.iterrows():
+            rec      = linha.get('Recorrência')
+            atr_date = linha['Data de Venda']
+
+            if pd.notna(rec):
+                match = completas_cod[
+                    (completas_cod['Recorrência'] == rec) &
+                    (completas_cod['Data de Venda'] >= atr_date)
+                ]
+            else:
+                match = pd.DataFrame()  # sem Recorrência não dá pra cruzar
+
+            if match.empty:
+                # Parcela ATIVA — calcula valor com conversão de moeda
+                preco = clean_currency(linha.get('Preço Total', 0))
+                moeda = str(linha.get('Moeda de recebimento', 'BRL')).upper().strip()
+                if moeda not in ('BRL', 'REAL BRASILEIRO', ''):
+                    tcr = clean_currency(linha.get('Taxa de Câmbio Real', 0))
+                    tcv = clean_currency(linha.get('Taxa de Câmbio do valor recebido', 0))
+                    if tcr > 0 and tcv > 0:
+                        preco = preco * tcr * tcv
+                parcelas_ativas.append({'data': atr_date, 'valor': preco})
+            else:
+                # Parcela RECUPERADA
+                data_rec = match['Data de Venda'].min()
+                parcelas_recuperadas.append({'data_recuperacao': data_rec})
+
+        # Registra em lista_ativos se tem parcelas não resolvidas
+        if parcelas_ativas:
+            datas_ativas = [p['data'] for p in parcelas_ativas if pd.notna(p['data'])]
+            data_mais_antiga = min(datas_ativas) if datas_ativas else None
+            dias = int((hoje - data_mais_antiga).days) if data_mais_antiga is not None else 0
+            valor_total = sum(p['valor'] for p in parcelas_ativas)
+
+            lista_ativos.append({
+                'nome':               str(ref_row.get('Nome', 'Desconhecido')),
+                'email':              str(ref_row.get('Email', '')),
+                'telefone':           str(ref_row.get('Telefone', '')),
+                'produto':            str(ref_row.get('Nome do Produto', '')),
+                'codigo_assinante':   str(cod),
+                'parcelas_atrasadas': int(len(parcelas_ativas)),
+                'valor':              float(valor_total),
+                'dias':               dias,
+                'data': data_mais_antiga.strftime('%d/%m/%Y') if data_mais_antiga is not None and pd.notna(data_mais_antiga) else '',
+            })
+
+        # Registra em lista_recuperados se tem parcelas resolvidas
+        if parcelas_recuperadas:
+            datas_rec = [p['data_recuperacao'] for p in parcelas_recuperadas if pd.notna(p['data_recuperacao'])]
+            data_recuperacao = max(datas_rec) if datas_rec else None
+
+            # Valor recuperado: soma das completas do cod no período (simplificação razoável)
+            valor_rec = float(completas_cod['Faturamento_Bruto'].sum()) if 'Faturamento_Bruto' in completas_cod.columns else 0.0
+
+            lista_recuperados.append({
+                'nome':                str(ref_row.get('Nome', 'Desconhecido')),
+                'email':               str(ref_row.get('Email', '')),
+                'produto':             str(ref_row.get('Nome do Produto', '')),
+                'codigo_assinante':    str(cod),
+                'parcelas_recuperadas': int(len(parcelas_recuperadas)),
+                'valor_recuperado':    valor_rec,
+                'data_recuperacao':    data_recuperacao.strftime('%d/%m/%Y') if data_recuperacao is not None and pd.notna(data_recuperacao) else '',
+            })
+
+    # Métricas agregadas
+    total_assinantes = len(assin_ativos_periodo | cods_atrasados)
+    n_ativos     = len(lista_ativos)
+    n_recuperados = len(lista_recuperados)
+
+    taxa_inad = (n_ativos / total_assinantes * 100) if total_assinantes > 0 else 0.0
+    taxa_rec  = (n_recuperados / (n_ativos + n_recuperados) * 100) if (n_ativos + n_recuperados) > 0 else 0.0
+
+    aging = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
+    for item in lista_ativos:
+        d = item['dias']
+        if   d <= 30: aging["0-30"]  += 1
+        elif d <= 60: aging["31-60"] += 1
+        elif d <= 90: aging["61-90"] += 1
+        else:         aging["90+"]   += 1
+
+    return {
+        'total_inadimplentes': n_ativos,
+        'total_recuperados':   n_recuperados,
+        'taxa_inadimplencia':  round(taxa_inad, 2),
+        'taxa_recuperacao':    round(taxa_rec, 2),
+        'valor_em_aberto':     round(sum(i['valor'] for i in lista_ativos), 2),
+        'valor_recuperado':    round(sum(r['valor_recuperado'] for r in lista_recuperados), 2),
+        'aging':               aging,
+        'lista_ativos':        sorted(lista_ativos, key=lambda x: x['dias'], reverse=True)[:100],
+        'lista_recuperados':   sorted(lista_recuperados, key=lambda x: x['data_recuperacao'], reverse=True)[:100],
+    }
+
+
 def get_inadimplencia(start_date=None, end_date=None):
     try:
         d_start, d_end = _resolve_dates(start_date, end_date)
@@ -516,69 +636,32 @@ def get_inadimplencia(start_date=None, end_date=None):
         return {"sucesso": False, "erro": "Sem dados"}
 
     df_all = _rows_to_df(rows)
+    COD = 'Código do assinante'
+    df_assin = df_all[df_all[COD].notna() & (df_all[COD] != '')].copy()
 
-    # Inadimplência só existe para assinantes (Código do assinante preenchido)
-    df_assin = df_all[df_all['Código do assinante'].notna() & (df_all['Código do assinante'] != '')].copy()
-
-    assinantes_ativos = set(
-        df_assin[df_assin['Status'].isin(['Completo', 'Aprovado'])]['Código do assinante'].unique()
-    )
-    inad_periodo = set(
-        df_assin[df_assin['Status'] == 'Atrasado']['Código do assinante'].unique()
-    )
-
+    # Busca dados pós-período para checar recuperações após o fim do período
     hoje = datetime.now()
-    aging = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
-    lista_devedores = []
+    df_extended = pd.DataFrame()
+    if d_end < pd.Timestamp(hoje) - pd.Timedelta(hours=1):
+        today_iso = hoje.strftime('%Y-%m-%dT%H:%M:%S')
+        rows_ext = fetch_transacoes_period(e_iso, today_iso)
+        if rows_ext:
+            df_ext_all = _rows_to_df(rows_ext)
+            df_extended = df_ext_all[df_ext_all[COD].notna() & (df_ext_all[COD] != '')].copy()
 
-    for cod in inad_periodo:
-        hist      = df_assin[df_assin['Código do assinante'] == cod]
-        atrasadas = hist[hist['Status'] == 'Atrasado']
-        qtd_atrasadas = len(atrasadas)
-
-        ref_row       = atrasadas.iloc[0]
-        preco_unitario = clean_currency(ref_row.get('Preço Total', 0))
-        moeda = str(ref_row.get('Moeda de recebimento', 'BRL')).upper().strip()
-        if moeda not in ('BRL', 'REAL BRASILEIRO', ''):
-            tcr = clean_currency(ref_row.get('Taxa de Câmbio Real', 0))
-            tcv = clean_currency(ref_row.get('Taxa de Câmbio do valor recebido', 0))
-            if tcr > 0 and tcv > 0:
-                preco_unitario = preco_unitario * tcr * tcv
-
-        valor_devido    = preco_unitario * qtd_atrasadas
-        data_mais_antiga = atrasadas['Data de Venda'].min()
-        dias = (hoje - data_mais_antiga).days if pd.notna(data_mais_antiga) else 0
-
-        if   dias <= 30: aging["0-30"]  += 1
-        elif dias <= 60: aging["31-60"] += 1
-        elif dias <= 90: aging["61-90"] += 1
-        else:            aging["90+"]   += 1
-
-        nome_row = hist.iloc[-1]
-        lista_devedores.append({
-            "nome":               str(nome_row.get('Nome', 'Desconhecido')),
-            "email":              str(nome_row.get('Email', '')),
-            "telefone":           str(nome_row.get('Telefone', '')),
-            "produto":            str(nome_row.get('Nome do Produto', '')),
-            "codigo_assinante":   str(cod),
-            "parcelas_atrasadas": int(qtd_atrasadas),
-            "valor":              float(valor_devido),
-            "dias":               int(dias),
-            "data": data_mais_antiga.strftime('%d/%m/%Y') if pd.notna(data_mais_antiga) else ''
-        })
-
-    lista_devedores.sort(key=lambda x: x['dias'], reverse=True)
-
-    total_ativos = len(assinantes_ativos | inad_periodo)
-    total_inad   = len(inad_periodo)
-    taxa = (total_inad / total_ativos * 100) if total_ativos > 0 else 0
+    res = _inad_resolve(df_assin, df_extended if not df_extended.empty else None)
 
     return {
         "sucesso": True,
         "geral": {
-            "total_inadimplentes": int(total_inad),
-            "taxa_inadimplencia":  float(taxa)
+            "total_inadimplentes": res['total_inadimplentes'],
+            "total_recuperados":   res['total_recuperados'],
+            "taxa_inadimplencia":  res['taxa_inadimplencia'],
+            "taxa_recuperacao":    res['taxa_recuperacao'],
+            "valor_em_aberto":     res['valor_em_aberto'],
+            "valor_recuperado":    res['valor_recuperado'],
         },
-        "aging": aging,
-        "lista": lista_devedores[:100]
+        "aging":             res['aging'],
+        "lista":             res['lista_ativos'],
+        "lista_recuperados": res['lista_recuperados'],
     }

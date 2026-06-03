@@ -440,22 +440,34 @@
                 <div class="card danger">
                     <h3>Devedores Ativos</h3>
                     <p id="valDevedores" class="val">0</p>
+                    <p class="mom" id="valEmAberto" style="color:var(--danger)">R$ 0</p>
                 </div>
                 <div class="card danger">
                     <h3>Taxa de Inadimplência</h3>
                     <p id="valTaxaInad" class="val">0%</p>
+                    <p class="mom" style="color:var(--text-muted)">sobre assinantes do período</p>
+                </div>
+                <div class="card">
+                    <h3>Recuperados no Período</h3>
+                    <p id="valRecuperados" class="val" style="color:var(--success)">0</p>
+                    <p class="mom" id="valRecuperado" style="color:var(--success)">R$ 0</p>
+                </div>
+                <div class="card">
+                    <h3>Taxa de Recuperação</h3>
+                    <p id="valTaxaRecuperacao" class="val" style="color:var(--success)">0%</p>
+                    <p class="mom" style="color:var(--text-muted)">dos que atrasaram no período</p>
                 </div>
             </div>
 
             <div class="charts-row">
                 <div class="chart-container">
-                    <h3>Aging (Idade da Dívida)</h3>
+                    <h3>Aging — Devedores Ativos (dias em atraso)</h3>
                     <canvas id="agingChart"></canvas>
                 </div>
             </div>
 
             <div class="table-container mt-2">
-                <h3>Lista de Cobrança</h3>
+                <h3>Lista de Cobrança — Devedores Ativos</h3>
                 <table class="modern-table">
                     <thead>
                         <tr>
@@ -463,12 +475,26 @@
                             <th>Cliente</th>
                             <th>Contato</th>
                             <th>Produto</th>
-                            <th>Valor</th>
+                            <th>Valor em Aberto</th>
                         </tr>
                     </thead>
-                    <tbody id="devedoresTbody">
-                        <!-- Populated via JS -->
-                    </tbody>
+                    <tbody id="devedoresTbody"></tbody>
+                </table>
+            </div>
+
+            <div class="table-container mt-2" id="secaoRecuperados" style="display:none">
+                <h3>Recuperações no Período ✅</h3>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Produto</th>
+                            <th>Parcelas Recup.</th>
+                            <th>Valor Recuperado</th>
+                            <th>Data Recuperação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recuperadosTbody"></tbody>
                 </table>
             </div>
         </div>
