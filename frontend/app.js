@@ -451,6 +451,7 @@ function renderInadimplencia(data) {
     document.getElementById('valRecuperados').innerText      = g.total_recuperados ?? 0;
     document.getElementById('valTaxaRecuperacao').innerText  = `${(g.taxa_recuperacao ?? 0).toFixed(1)}%`;
     document.getElementById('valRecuperado').innerText       = formatCurrency(g.valor_recuperado ?? 0);
+    document.getElementById('subTaxaInad').innerText         = `sobre ${g.total_assinantes ?? '—'} assinantes do período`;
 
     // Aging Chart
     const ctx = document.getElementById('agingChart').getContext('2d');

@@ -614,6 +614,7 @@ def _inad_resolve(df_assin: pd.DataFrame, df_extended: pd.DataFrame = None) -> d
     return {
         'total_inadimplentes': n_ativos,
         'total_recuperados':   n_recuperados,
+        'total_assinantes':    total_assinantes,
         'taxa_inadimplencia':  round(taxa_inad, 2),
         'taxa_recuperacao':    round(taxa_rec, 2),
         'valor_em_aberto':     round(sum(i['valor'] for i in lista_ativos), 2),
@@ -656,6 +657,7 @@ def get_inadimplencia(start_date=None, end_date=None):
         "geral": {
             "total_inadimplentes": res['total_inadimplentes'],
             "total_recuperados":   res['total_recuperados'],
+            "total_assinantes":    res['total_assinantes'],
             "taxa_inadimplencia":  res['taxa_inadimplencia'],
             "taxa_recuperacao":    res['taxa_recuperacao'],
             "valor_em_aberto":     res['valor_em_aberto'],
