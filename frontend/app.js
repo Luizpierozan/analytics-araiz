@@ -522,34 +522,45 @@ function renderInadimplencia(data) {
 }
 
 // ── Parcelamentos ─────────────────────────────────────────────────────────────
-let _parcelData = null;  // cache local para re-render do gráfico de retenção
+let _parcelData = null;
 
-function _renderRetencaoChart(retencaoData) {
-    const cc = chartColors();
+function _renderRetencaoChart(retData, label) {
+    // retData pode ser:
+    //   • objeto geral:     { contratos, curva: {1:78.8, 2:55.0, ...} }
+    //   • objeto por_turma: { T06: {contratos, curva}, T07: {contratos, curva}, ... }
+    const cc  = chartColors();
     const ctx = document.getElementById('retencaoParcelChart').getContext('2d');
     if (retencaoParcelChart) retencaoParcelChart.destroy();
 
-    const paleta  = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899'];
-    const planos  = Object.keys(retencaoData || {});
-    const maxPos  = planos.length > 0 ? Math.max(...planos.map(p => retencaoData[p].plano)) : 12;
-    const labels  = Array.from({length: maxPos}, (_, i) => `Parcela ${i + 1}`);
+    const paleta = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#F97316','#06B6D4'];
+    const labels = Array.from({length: 12}, (_, i) => `Mês ${i + 1}`);
 
-    const datasets = planos.map((plano, idx) => {
-        const info = retencaoData[plano];
-        const vals = Array.from({length: maxPos}, (_, i) => {
-            const pos = i + 1;
-            return pos <= info.plano ? (info.curva[pos] ?? null) : null;
-        });
-        return {
-            label:           `${plano} (${info.contratos} contratos)`,
+    let datasets = [];
+
+    if (retData && retData.curva) {
+        // Modo: uma única turma ou geral (objeto com {contratos, curva})
+        const vals = Array.from({length: 12}, (_, i) => retData.curva[i + 1] ?? null);
+        datasets = [{
+            label:           label || `Geral (${retData.contratos} assinantes)`,
             data:            vals,
+            borderColor:     paleta[0],
+            backgroundColor: paleta[0] + '22',
+            tension:         0.3,
+            pointRadius:     4,
+            spanGaps:        false,
+        }];
+    } else if (retData) {
+        // Modo: todas as turmas — retData = { T03: {...}, T04: {...}, ... }
+        datasets = Object.entries(retData).map(([turma, info], idx) => ({
+            label:           `${turma} (${info.contratos})`,
+            data:            Array.from({length: 12}, (_, i) => info.curva[i + 1] ?? null),
             borderColor:     paleta[idx % paleta.length],
             backgroundColor: paleta[idx % paleta.length] + '22',
             tension:         0.3,
             pointRadius:     4,
             spanGaps:        false,
-        };
-    });
+        }));
+    }
 
     retencaoParcelChart = new Chart(ctx, {
         type: 'line',
@@ -558,12 +569,12 @@ function _renderRetencaoChart(retencaoData) {
             scales: {
                 x: { grid: { color: cc.grid }, ticks: { color: cc.text } },
                 y: {
-                    grid: { color: cc.grid }, ticks: { color: cc.text },
                     min: 0, max: 100,
+                    grid: { color: cc.grid }, ticks: { color: cc.text },
                     title: { display: true, text: 'Retenção (%)', color: cc.text }
                 }
             },
-            plugins: { legend: { labels: { color: cc.text } } }
+            plugins: { legend: { labels: { color: cc.text, boxWidth: 12 } } }
         }
     });
 }
@@ -572,28 +583,30 @@ function renderParcelamentos(data) {
     _parcelData = data;
 
     // Cards
-    document.getElementById('valContratosAtivos').innerText = data.cards.contratos_ativos ?? 0;
-    document.getElementById('valParcelas30d').innerText     = data.cards.parcelas_30d ?? 0;
+    document.getElementById('valContratosAtivos').innerText = data.cards.assinantes_ativos ?? 0;
+    document.getElementById('valParcelas30d').innerText     = data.cards.vencimentos_30d ?? 0;
     document.getElementById('valReceita6m').innerText       = formatCurrency(data.cards.receita_6m ?? 0);
 
-    // Popular filtro de turma
+    // Popular select de turma
     const sel = document.getElementById('filtroTurmaParcel');
     sel.innerHTML = '<option value="geral">Todas as turmas</option>';
     (data.retention.turmas || []).forEach(t => {
         const opt = document.createElement('option');
-        opt.value = t; opt.textContent = t;
+        opt.value = t; opt.textContent = `${t} (${data.retention.por_turma[t]?.contratos ?? 0} assinantes)`;
         sel.appendChild(opt);
     });
     sel.onchange = () => {
-        const turma = sel.value;
-        const ret   = turma === 'geral'
-            ? _parcelData.retention.geral
-            : (_parcelData.retention.por_turma[turma] || {});
-        _renderRetencaoChart(ret);
+        const v = sel.value;
+        if (v === 'geral') {
+            _renderRetencaoChart(_parcelData.retention.por_turma, null);
+        } else {
+            const info = _parcelData.retention.por_turma[v];
+            _renderRetencaoChart(info, `${v} (${info?.contratos} assinantes)`);
+        }
     };
 
-    // Gráfico 1 — Retenção (inicia com geral)
-    _renderRetencaoChart(data.retention.geral || {});
+    // Gráfico 1 — inicia mostrando todas as turmas
+    _renderRetencaoChart(data.retention.por_turma, null);
 
     // Gráfico 2 — Projeção mensal (barras)
     const cc      = chartColors();
@@ -628,8 +641,8 @@ function renderParcelamentos(data) {
     tbody.innerHTML = (data.tabela || []).map(c => `<tr>
         <td><strong>${c.nome}</strong><br><span style="font-size:11px;color:var(--text-muted)">${c.email}</span></td>
         <td>${c.produto}</td>
-        <td style="text-align:center"><strong>${c.plano}</strong></td>
-        <td style="text-align:center">${c.parcela_atual}</td>
+        <td style="text-align:center">${c.turma}</td>
+        <td style="text-align:center">${c.rec_atual} / 12</td>
         <td style="text-align:center">
             <span class="${c.restantes <= 2 ? 'badge-danger' : ''}">${c.restantes}</span>
         </td>

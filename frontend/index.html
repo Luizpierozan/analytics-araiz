@@ -439,25 +439,25 @@
 
             <div class="cards">
                 <div class="card">
-                    <h3>Contratos Ativos</h3>
+                    <h3>Assinantes Ativos</h3>
                     <p id="valContratosAtivos" class="val">0</p>
-                    <p class="mom" style="color:var(--text-muted)">com parcelas em aberto</p>
+                    <p class="mom" style="color:var(--text-muted)">com mensalidades em aberto</p>
                 </div>
                 <div class="card">
-                    <h3>Parcelas nos próx. 30 dias</h3>
+                    <h3>Vencimentos em 30 dias</h3>
                     <p id="valParcelas30d" class="val">0</p>
-                    <p class="mom" style="color:var(--text-muted)">contratos com vencimento próximo</p>
+                    <p class="mom" style="color:var(--text-muted)">cobranças previstas</p>
                 </div>
                 <div class="card">
                     <h3>Receita Projetada (6 meses)</h3>
                     <p id="valReceita6m" class="val">R$ 0</p>
-                    <p class="mom" style="color:var(--text-muted)">soma das parcelas futuras</p>
+                    <p class="mom" style="color:var(--text-muted)">mensalidades futuras previstas</p>
                 </div>
             </div>
 
             <div class="chart-container">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-                    <h3 style="margin:0">Curva de Retenção por Tipo de Plano</h3>
+                    <h3 style="margin:0">Curva de Retenção por Turma</h3>
                     <select id="filtroTurmaParcel" class="modern-select" style="font-size:0.85rem;padding:0.4rem 0.75rem">
                         <option value="geral">Todas as turmas</option>
                     </select>
@@ -471,15 +471,15 @@
             </div>
 
             <div class="table-container mt-2">
-                <h3>Contratos Ativos</h3>
+                <h3>Assinantes Ativos</h3>
                 <table class="modern-table">
                     <thead>
                         <tr>
                             <th>Cliente</th>
                             <th>Produto</th>
-                            <th>Plano</th>
-                            <th>Parcela Atual</th>
-                            <th>Restantes</th>
+                            <th>Turma</th>
+                            <th>Mês Atual</th>
+                            <th>Meses Restantes</th>
                             <th>Próximo Vencimento</th>
                         </tr>
                     </thead>
