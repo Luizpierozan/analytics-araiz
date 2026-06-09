@@ -7,6 +7,7 @@ from auth import router as auth_router, get_current_user, require_superadmin, de
 from analise_avancada import ingest_new_file, get_dashboard_geral, get_inadimplencia
 from projecoes import get_projecoes, invalidate_cache
 from clientes import get_clientes, invalidate_cache as invalidate_cache_clientes
+from parcelamentos import get_parcelamentos, invalidate_cache as invalidate_cache_parcelamentos
 from dotenv import load_dotenv
 import os, tempfile
 
@@ -73,6 +74,7 @@ async def upload_file(
         if linhas is not False:
             invalidate_cache()  # força recálculo das projeções
             invalidate_cache_clientes()
+            invalidate_cache_parcelamentos()
             return {"sucesso": True, "linhas": linhas}
         else:
             return JSONResponse({"sucesso": False, "erro": "Erro ao processar arquivo"}, status_code=500)
@@ -171,6 +173,7 @@ async def reverter_upload(upload_id: int, user: dict = Depends(require_superadmi
     # Invalida caches
     invalidate_cache()
     invalidate_cache_clientes()
+    invalidate_cache_parcelamentos()
 
     return {
         'sucesso':   True,
@@ -186,6 +189,11 @@ async def inadimplencia(
     user: dict = Depends(get_current_user),
 ):
     return get_inadimplencia(start_date=start, end_date=end)
+
+
+@app.get("/api/parcelamentos")
+async def parcelamentos(user: dict = Depends(get_current_user)):
+    return get_parcelamentos()
 
 
 # ── Frontend estático (deve ser o último mount) ───────────────────────────────

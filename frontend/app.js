@@ -64,10 +64,12 @@ const navGeral    = document.getElementById('nav-geral');
 const navInad     = document.getElementById('nav-inadimplencia');
 const navProj     = document.getElementById('nav-projecoes');
 const navClientes = document.getElementById('nav-clientes');
+const navParcel   = document.getElementById('nav-parcelamentos');
 const pageGeral   = document.getElementById('page-geral');
 const pageInad    = document.getElementById('page-inadimplencia');
 const pageProj    = document.getElementById('page-projecoes');
 const pageClientes = document.getElementById('page-clientes');
+const pageParcel  = document.getElementById('page-parcelamentos');
 const fileInput   = document.getElementById('fileInput');
 const btnUpload   = document.getElementById('btnUpload');
 const loading     = document.getElementById('loading');
@@ -90,13 +92,16 @@ let survivalChart      = null;
 let projecaoChart      = null;
 let sazonalidadeChart  = null;
 let rfmChart           = null;
+let retencaoParcelChart  = null;
+let projecaoParcelChart  = null;
 
-let projecoesLoaded = false;  // carrega só quando a aba for aberta pela primeira vez
-let clientesLoaded  = false;
+let projecoesLoaded    = false;  // carrega só quando a aba for aberta pela primeira vez
+let clientesLoaded     = false;
+let parcelamentosLoaded = false;
 
 function showPage(page) {
-    [pageGeral, pageInad, pageProj, pageClientes].forEach(p => p.classList.add('hidden'));
-    [navGeral, navInad, navProj, navClientes].forEach(n => n.classList.remove('active'));
+    [pageGeral, pageInad, pageProj, pageClientes, pageParcel].forEach(p => p.classList.add('hidden'));
+    [navGeral, navInad, navProj, navClientes, navParcel].forEach(n => n.classList.remove('active'));
     page.classList.remove('hidden');
 }
 
@@ -127,6 +132,20 @@ navClientes.addEventListener('click', e => {
     e.preventDefault();
     showPage(pageClientes); navClientes.classList.add('active');
     if (!clientesLoaded) loadClientes();
+});
+
+navParcel.addEventListener('click', async (e) => {
+    e.preventDefault();
+    showPage(pageParcel); navParcel.classList.add('active');
+    if (!parcelamentosLoaded) {
+        showLoading('Analisando parcelamentos');
+        try {
+            const res  = await fetch('/api/parcelamentos');
+            const data = await res.json();
+            if (data.sucesso) { renderParcelamentos(data); parcelamentosLoaded = true; }
+        } catch(err) { console.error('Erro parcelamentos', err); }
+        finally { hideLoading(); }
+    }
 });
 
 // Upload
@@ -500,6 +519,98 @@ function renderInadimplencia(data) {
     } else {
         secao.style.display = 'none';
     }
+}
+
+// ── Parcelamentos ─────────────────────────────────────────────────────────────
+function renderParcelamentos(data) {
+    // Cards
+    document.getElementById('valContratosAtivos').innerText = data.cards.contratos_ativos ?? 0;
+    document.getElementById('valParcelas30d').innerText     = data.cards.parcelas_30d ?? 0;
+    document.getElementById('valReceita6m').innerText       = formatCurrency(data.cards.receita_6m ?? 0);
+
+    const cc = chartColors();
+
+    // Gráfico 1 — Retenção por plano (linhas)
+    const ctxRet = document.getElementById('retencaoParcelChart').getContext('2d');
+    if (retencaoParcelChart) retencaoParcelChart.destroy();
+
+    const paleta = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899'];
+    const planos  = Object.keys(data.retention || {});
+    const maxPos  = planos.length > 0 ? Math.max(...planos.map(p => data.retention[p].plano)) : 12;
+    const labels  = Array.from({length: maxPos}, (_, i) => `Parcela ${i + 1}`);
+
+    const datasets = planos.map((plano, idx) => {
+        const info  = data.retention[plano];
+        const vals  = Array.from({length: maxPos}, (_, i) => {
+            const pos = i + 1;
+            return pos <= info.plano ? (info.curva[pos] ?? null) : null;
+        });
+        return {
+            label:           `${plano} (${info.contratos} contratos)`,
+            data:            vals,
+            borderColor:     paleta[idx % paleta.length],
+            backgroundColor: paleta[idx % paleta.length] + '22',
+            tension:         0.3,
+            pointRadius:     4,
+            spanGaps:        false,
+        };
+    });
+
+    retencaoParcelChart = new Chart(ctxRet, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            scales: {
+                x: { grid: { color: cc.grid }, ticks: { color: cc.text } },
+                y: {
+                    grid: { color: cc.grid }, ticks: { color: cc.text },
+                    min: 0, max: 100,
+                    title: { display: true, text: 'Retenção (%)', color: cc.text }
+                }
+            },
+            plugins: { legend: { labels: { color: cc.text } } }
+        }
+    });
+
+    // Gráfico 2 — Projeção mensal (barras)
+    const ctxProj = document.getElementById('projecaoParcelChart').getContext('2d');
+    if (projecaoParcelChart) projecaoParcelChart.destroy();
+
+    projecaoParcelChart = new Chart(ctxProj, {
+        type: 'bar',
+        data: {
+            labels:   data.projection.labels || [],
+            datasets: [{
+                label:           'Receita Esperada (R$)',
+                data:            data.projection.valores || [],
+                backgroundColor: '#3B82F6',
+                borderRadius:    6,
+            }]
+        },
+        options: {
+            scales: {
+                x: { grid: { color: cc.grid }, ticks: { color: cc.text } },
+                y: {
+                    grid: { color: cc.grid },
+                    ticks: { color: cc.text, callback: v => 'R$ ' + v.toLocaleString('pt-BR') }
+                }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // Tabela
+    const tbody = document.getElementById('parcelTbody');
+    tbody.innerHTML = (data.tabela || []).map(c => `<tr>
+        <td><strong>${c.nome}</strong><br><span style="font-size:11px;color:var(--text-muted)">${c.email}</span></td>
+        <td>${c.produto}</td>
+        <td style="text-align:center"><strong>${c.plano}</strong></td>
+        <td style="text-align:center">${c.parcela_atual}</td>
+        <td style="text-align:center">
+            <span class="${c.restantes <= 2 ? 'badge-danger' : ''}">${c.restantes}</span>
+        </td>
+        <td>${c.proxima}</td>
+    </tr>`).join('');
 }
 
 // ── Projeções ────────────────────────────────────────────────────────────────

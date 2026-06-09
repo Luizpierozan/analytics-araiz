@@ -171,3 +171,27 @@ def fetch_emails_before(end_iso: str) -> set:
            .in_("Status", ["Completo", "Aprovado"]))
     rows = _paginate(q)
     return {r["Email"].lower().strip() for r in rows if r.get("Email")}
+
+
+def fetch_parcelamentos() -> list[dict]:
+    """Busca todas as transações parceladas (Recorrência nula, Número da Parcela >= 1).
+
+    Exclui assinaturas (Código do assinante preenchido com Recorrência >= 1).
+    Inclui todos os status para rastrear o ciclo completo (Completo, Atrasado, Cancelado, etc).
+    """
+    sb = get_supabase()
+    cols = ",".join([
+        '"Email"', '"Nome"', '"Nome do Produto"',
+        '"Número da Parcela"', '"Recorrência"', '"Status"',
+        '"Data de Venda"',
+        '"Preço Total"', '"Preço Total Convertido"',
+        '"Moeda de recebimento"', '"Taxa de Câmbio Real"',
+        '"Taxa de Câmbio do valor recebido"',
+        '"Faturamento líquido"', '"Valor que você recebeu convertido"',
+    ])
+    q = (sb.table("transacoes")
+           .select(cols)
+           .is_('"Recorrência"', 'null')
+           .not_.is_('"Número da Parcela"', 'null')
+           .order('"Data de Venda"'))
+    return _paginate(q)
