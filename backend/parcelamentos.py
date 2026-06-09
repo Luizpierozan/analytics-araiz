@@ -2,35 +2,74 @@
 Módulo de Parcelamentos — A Raiz da Solução
 
 Analisa contratos parcelados (compras em Nx — sem assinatura):
-- Retenção por tipo de plano (4x, 6x, 10x, 12x)
+- Retenção por tipo de plano (4x, 6x, 10x, 12x) — global e por turma
 - Projeção de receita das parcelas nos próximos 6 meses
 - Tabela de contratos ativos
 
-Definição de contrato: (email_norm, Nome do Produto, mes_inicio)
-mes_inicio = mês/ano da Parcela 1 daquele contrato.
-Contratos separados: mesmo email que comprou em T5 e T7 gera 2 contratos distintos.
+Definição de contrato: (email_norm, produto, mes_inicio)
+mes_inicio = mês calculado como: data_parcela - (parcela_num - 1) * 30 dias
+Isso funciona para qualquer parcela da sequência, sem precisar ver a Parcela 1 explicitamente.
+
+Nota Hotmart: a Parcela 1 é sempre marcada como "Apenas à vista" no campo
+"Tipo pagamento oferta". Só as parcelas >= 2 têm "Parcelamento padrão".
+Por isso o filtro de contratos válidos é: max(parcela_num) > 1 por grupo.
 """
 
 import pandas as pd
 import time
-from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from database import fetch_parcelamentos
 from analise_avancada import compute_net_revenue
 
 MIN_CONTRATOS_PLANO = 5   # mínimo de contratos para exibir linha de retenção
 CUTOFF_ATIVO_DIAS   = 60  # considera ativo se pagou nos últimos N dias
-MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+PLANOS_PADRAO       = [2, 3, 4, 6, 10, 12]  # tamanhos de plano reconhecidos
+
+
+def _infer_plano_final(max_obs: int) -> int:
+    """Infere o tamanho real do plano com base no máximo observado.
+
+    Para contratos em andamento (max_obs < plano real), usa o menor plano padrão
+    >= max_obs. Ex: max_obs=9 → 10; max_obs=11 → 12.
+    """
+    for p in PLANOS_PADRAO:
+        if max_obs <= p:
+            return p
+    return max_obs
+
+# Janelas de turma (mês início, mês fim — formato YYYY-MM, ambos inclusive)
+_TURMA_JANELAS_MESES = [
+    (1,  '2021-08', '2021-09'),
+    (2,  '2022-05', '2022-09'),
+    (3,  '2023-04', '2023-06'),
+    (4,  '2023-10', '2023-12'),
+    (5,  '2023-12', '2024-07'),
+    (6,  '2024-09', '2025-04'),
+    (7,  '2025-04', '2025-08'),
+    (8,  '2025-09', '2026-02'),
+    (9,  '2026-02', '2026-12'),
+]
 
 _cache: dict = {}
 _CACHE_TTL = 600
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _assign_turma(mes: str) -> str:
+    """Atribui turma pelo mês de início do contrato (YYYY-MM)."""
+    for tid, start, end in _TURMA_JANELAS_MESES:
+        if start <= mes <= end:
+            return f'T{tid:02d}'
+    return 'Outros'
 
 
 def _to_df(rows: list[dict]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
-    df['Data de Venda'] = pd.to_datetime(df['Data de Venda'], errors='coerce', utc=True).dt.tz_localize(None)
+    df['Data de Venda'] = (pd.to_datetime(df['Data de Venda'], errors='coerce', utc=True)
+                           .dt.tz_localize(None))
     df['parcela_num']   = pd.to_numeric(df['Número da Parcela'], errors='coerce')
     df['fat_liq']       = df.apply(compute_net_revenue, axis=1)
     df['email_norm']    = df['Email'].astype(str).str.lower().str.strip()
@@ -39,303 +78,257 @@ def _to_df(rows: list[dict]) -> pd.DataFrame:
 
 def _build_contracts(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Agrupa parcelas em contratos: (email_norm, produto, mes_inicio).
+    Agrupa parcelas em contratos de forma vetorizada.
 
-    Lógica:
-    1. Para cada (email, produto), encontra todas as linhas com parcela_num >= 1.
-    2. Identifica "inícios" de contratos: linhas com parcela_num == 1.
-    3. Cada Parcela N é atribuída ao início cujo data_p1_esperada (= data_row - (N-1)*30 dias)
-       está mais próxima de uma Parcela 1 real daquele (email, produto).
-    4. Contratos com apenas Parcela 1 observada e sem parcelas subsequentes são excluídos
-       (não confirmados como parcelamento — podem ser compras à vista).
+    Para cada linha com parcela_num >= 1, calcula o mês de início esperado:
+        mes_inicio = strftime('%Y-%m', data - (parcela_num - 1) * 30 dias)
+
+    Isso cria uma chave consistente para todas as parcelas do mesmo contrato.
+    Contratos com plano == 1 (só Parcela 1 observada) são excluídos — provavelmente
+    compras à vista cujas parcelas subsequentes nunca apareceram.
     """
     if df.empty:
         return pd.DataFrame()
 
-    records = []
-
-    for (email, produto), grp in df.groupby(['email_norm', 'Nome do Produto']):
-        grp = grp.sort_values('Data de Venda')
-
-        # Inícios de contratos = linhas com parcela_num == 1
-        starts = grp[grp['parcela_num'] == 1].copy()
-        if starts.empty:
-            continue
-
-        start_dates = starts['Data de Venda'].tolist()
-
-        # Para cada linha, encontra o início mais próximo
-        for _, row in grp.iterrows():
-            n = row['parcela_num']
-            if pd.isna(n) or n < 1:
-                continue
-            n = int(n)
-            # Data esperada da parcela 1 para essa linha
-            expected_p1 = row['Data de Venda'] - pd.Timedelta(days=int((n - 1) * 30))
-            # Início mais próximo
-            diffs = [abs((expected_p1 - sd).total_seconds()) for sd in start_dates]
-            best_idx = diffs.index(min(diffs))
-            # Aceita apenas se a diferença for < 45 dias (tolerância)
-            if min(diffs) > 45 * 86400:
-                continue
-            mes_inicio = start_dates[best_idx].strftime('%Y-%m')
-            records.append({
-                'email_norm':  email,
-                'produto':     produto,
-                'nome':        str(row.get('Nome', '')),
-                'mes_inicio':  mes_inicio,
-                'parcela_num': n,
-                'status':      str(row.get('Status', '')),
-                'data':        row['Data de Venda'],
-                'fat_liq':     float(row['fat_liq']),
-            })
-
-    if not records:
+    df = df[df['parcela_num'].notna() & (df['parcela_num'] >= 1)].copy()
+    if df.empty:
         return pd.DataFrame()
 
-    return pd.DataFrame(records)
+    df['parcela_int'] = df['parcela_num'].astype(int)
+
+    # Mês de início estimado (vetorizado)
+    offset_days = (df['parcela_int'] - 1) * 30
+    df['mes_inicio'] = (df['Data de Venda'] - pd.to_timedelta(offset_days, unit='D')).dt.strftime('%Y-%m')
+    df['produto']    = df['Nome do Produto'].astype(str)
+    df['nome']       = df['Nome'].fillna('').astype(str) if 'Nome' in df.columns else ''
+    df['status']     = df['Status'].astype(str)
+    df['data']       = df['Data de Venda']
+    df['parcela_num'] = df['parcela_int']
+
+    C_KEYS = ['email_norm', 'produto', 'mes_inicio']
+
+    # Manter só contratos com plano > 1 (verdadeiro parcelamento)
+    max_p = df.groupby(C_KEYS)['parcela_num'].transform('max')
+    df = df[max_p > 1].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    # Atribuição de turma
+    df['turma'] = df['mes_inicio'].map(_assign_turma)
+
+    cols = ['email_norm', 'produto', 'nome', 'mes_inicio', 'turma',
+            'parcela_num', 'status', 'data', 'fat_liq']
+    return df[cols].reset_index(drop=True)
 
 
-def _infer_plano(group_parcelas: pd.DataFrame) -> int:
-    """Infere o tamanho do plano pelo máximo de parcela_num observado."""
-    return int(group_parcelas['parcela_num'].max())
+# ── Retenção ─────────────────────────────────────────────────────────────────
 
-
-def compute_retention(contracts_df: pd.DataFrame) -> dict:
+def _retention_for(df: pd.DataFrame) -> dict:
     """
-    Curva de retenção por tipo de plano.
+    Calcula curvas de retenção por tamanho de plano para um subset de contratos.
 
-    Para cada plano N e posição p:
-      eligible = contratos do plano N cujo mes_inicio tem pelo menos p meses atrás
-      paid_p   = eligible com Status Completo/Aprovado na posição p
-      retention[p] = paid_p / eligible   (se eligible >= MIN_CONTRATOS_PLANO)
-
-    Atrasado resolvido = conta como pago (verificado em _build_contracts:
-    se existem parcelas Completo e Atrasado para a mesma posição,
-    a Completo prevalece).
+    Usa merge vetorizado — evita loops Python por contrato.
     """
-    if contracts_df.empty:
+    if df.empty:
         return {}
 
-    hoje = pd.Timestamp.now()
-    OK   = {'Completo', 'Aprovado'}
+    hoje     = pd.Timestamp.now()
+    OK       = {'Completo', 'Aprovado'}
+    C_KEYS   = ['email_norm', 'produto', 'mes_inicio']
 
-    # Para cada contrato, calcular plano (max parcela observada)
-    contrato_keys = ['email_norm', 'produto', 'mes_inicio']
-    plano_map = (contracts_df
-                 .groupby(contrato_keys)['parcela_num']
-                 .max()
-                 .reset_index()
-                 .rename(columns={'parcela_num': 'plano'}))
+    plano_df = (df.groupby(C_KEYS)['parcela_num'].max()
+                .reset_index().rename(columns={'parcela_num': 'plano'}))
 
-    # Excluir contratos com plano == 1 (compra à vista confirmada)
-    plano_map = plano_map[plano_map['plano'] > 1]
-    if plano_map.empty:
-        return {}
-
-    df = contracts_df.merge(plano_map, on=contrato_keys, how='inner')
-
-    # Posição paga por contrato (paga = Completo/Aprovado)
-    df_pago = df[df['status'].isin(OK)]
+    df_full  = df.merge(plano_df, on=C_KEYS)
+    df_pago  = df_full[df_full['status'].isin(OK)].copy()
 
     result = {}
-    for plano_size, grp_plano in plano_map.groupby('plano'):
-        contrato_ids = set(map(tuple, grp_plano[contrato_keys].values.tolist()))
-        if len(contrato_ids) < MIN_CONTRATOS_PLANO:
+    for plano_size in sorted(plano_df['plano'].unique()):
+        if plano_size <= 1:
+            continue
+
+        contratos_plano = plano_df[plano_df['plano'] == plano_size][C_KEYS].copy()
+        if len(contratos_plano) < MIN_CONTRATOS_PLANO:
             continue
 
         curve = {}
-        for pos in range(1, plano_size + 1):
-            # Elegíveis: contratos velhos o suficiente para ter chegado na posição pos
-            min_inicio = (hoje - relativedelta(months=pos)).strftime('%Y-%m')
-            elegíveis = {
-                c for c in contrato_ids
-                if c[2] <= min_inicio   # mes_inicio <= min_inicio
-            }
+        for pos in range(1, int(plano_size) + 1):
+            min_inicio = (hoje - relativedelta(months=int(pos))).strftime('%Y-%m')
+            elegíveis = contratos_plano[contratos_plano['mes_inicio'] <= min_inicio]
             if len(elegíveis) < MIN_CONTRATOS_PLANO:
                 curve[pos] = None
                 continue
 
-            pagos = set()
-            for c in elegíveis:
-                mask = (
-                    (df_pago['email_norm'] == c[0]) &
-                    (df_pago['produto']    == c[1]) &
-                    (df_pago['mes_inicio'] == c[2]) &
-                    (df_pago['parcela_num'] == pos)
-                )
-                if df_pago[mask].shape[0] > 0:
-                    pagos.add(c)
-
-            curve[pos] = round(len(pagos) / len(elegíveis) * 100, 1)
+            # Quantos elegíveis pagaram a posição `pos`?
+            pagos_na_pos = (df_pago[df_pago['parcela_num'] == pos]
+                            .merge(elegíveis, on=C_KEYS, how='inner')[C_KEYS]
+                            .drop_duplicates())
+            curve[pos] = round(len(pagos_na_pos) / len(elegíveis) * 100, 1)
 
         result[f'{plano_size}x'] = {
-            'plano':     plano_size,
-            'contratos': len(contrato_ids),
-            'curva':     curve,   # {1: 100.0, 2: 87.3, ...}
+            'plano':     int(plano_size),
+            'contratos': int(len(contratos_plano)),
+            'curva':     {int(k): v for k, v in curve.items()},
         }
 
     return result
 
 
-def compute_projection(contracts_df: pd.DataFrame, months_ahead: int = 6) -> dict:
-    """
-    Projeta receita das parcelas futuras, mês a mês (até months_ahead meses).
+def compute_retention(contracts_df: pd.DataFrame) -> dict:
+    """Retenção global + por turma."""
+    if contracts_df.empty:
+        return {'geral': {}, 'por_turma': {}, 'turmas': []}
 
-    Só considera contratos ativos: último pagamento nos últimos CUTOFF_ATIVO_DIAS dias
-    e parcelas restantes > 0.
-    Valor das parcelas futuras = média das parcelas já pagas daquele contrato.
+    turmas = sorted(t for t in contracts_df['turma'].unique() if t != 'Outros')
+
+    ret_geral    = _retention_for(contracts_df)
+    ret_turmas   = {t: _retention_for(contracts_df[contracts_df['turma'] == t]) for t in turmas}
+
+    return {
+        'geral':     ret_geral,
+        'por_turma': ret_turmas,
+        'turmas':    turmas,
+    }
+
+
+# ── Projeção 6 meses ─────────────────────────────────────────────────────────
+
+def compute_projection(contracts_df: pd.DataFrame, months_ahead: int = 6) -> dict:
+    """Projeta receita mensal das parcelas futuras (até months_ahead meses).
+
+    Plano inferido com _infer_plano_final: contratos em andamento (ex: parcela 9 de 12)
+    têm seu plano corrigido para o padrão mais próximo.
     """
     if contracts_df.empty:
         return {'labels': [], 'valores': [], 'total': 0}
 
-    hoje    = pd.Timestamp.now()
-    cutoff  = hoje - pd.Timedelta(days=CUTOFF_ATIVO_DIAS)
-    OK      = {'Completo', 'Aprovado'}
-    contrato_keys = ['email_norm', 'produto', 'mes_inicio']
+    hoje   = pd.Timestamp.now()
+    cutoff = hoje - pd.Timedelta(days=CUTOFF_ATIVO_DIAS)
+    OK     = {'Completo', 'Aprovado'}
+    C_KEYS = ['email_norm', 'produto', 'mes_inicio']
 
-    plano_map = (contracts_df
-                 .groupby(contrato_keys)['parcela_num']
-                 .max()
-                 .reset_index()
-                 .rename(columns={'parcela_num': 'plano'}))
-    plano_map = plano_map[plano_map['plano'] > 1]
-    if plano_map.empty:
+    plano_df = (contracts_df.groupby(C_KEYS)['parcela_num'].max()
+                .reset_index().rename(columns={'parcela_num': 'max_obs'}))
+    plano_df = plano_df[plano_df['max_obs'] > 1]
+    if plano_df.empty:
         return {'labels': [], 'valores': [], 'total': 0}
 
-    df = contracts_df.merge(plano_map, on=contrato_keys, how='inner')
-
+    df = contracts_df.merge(plano_df, on=C_KEYS)
     monthly = {m: 0.0 for m in range(1, months_ahead + 1)}
 
-    for (email, produto, mes_inicio), grp in df.groupby(contrato_keys):
-        plano = int(grp['plano'].iloc[0])
-
-        pagas = grp[grp['status'].isin(OK)].sort_values('parcela_num')
+    for (email, produto, mes_inicio), grp in df.groupby(C_KEYS):
+        max_obs = int(grp['max_obs'].iloc[0])
+        pagas   = grp[grp['status'].isin(OK)].sort_values('parcela_num')
         if pagas.empty:
             continue
-
-        # Ativo: último pagamento recente
-        ultimo_pag = pagas['data'].max()
-        if ultimo_pag < cutoff:
+        if pagas['data'].max() < cutoff:
             continue
-
-        current_parcela = int(pagas['parcela_num'].max())
-        if current_parcela >= plano:
-            continue  # contrato completo
-
-        avg_valor = float(pagas['fat_liq'].mean()) if not pagas.empty else 0.0
-        if avg_valor <= 0:
+        current = int(pagas['parcela_num'].max())
+        plano   = _infer_plano_final(max(max_obs, current))
+        if current >= plano:
             continue
-
+        avg_val = float(pagas['fat_liq'].mean())
+        if avg_val <= 0:
+            continue
         for m in range(1, months_ahead + 1):
-            fut = current_parcela + m
-            if fut <= plano:
-                monthly[m] += avg_valor
+            if current + m <= plano:
+                monthly[m] += avg_val
 
-    labels = [
-        (hoje + relativedelta(months=m)).strftime('%b/%Y')
-        for m in range(1, months_ahead + 1)
-    ]
+    labels = [(hoje + relativedelta(months=m)).strftime('%b/%Y') for m in range(1, months_ahead + 1)]
     valores = [round(monthly[m], 2) for m in range(1, months_ahead + 1)]
 
-    return {
-        'labels': labels,
-        'valores': valores,
-        'total':   round(sum(valores), 2),
-    }
+    return {'labels': labels, 'valores': valores, 'total': round(sum(valores), 2)}
 
+
+# ── Tabela de ativos ──────────────────────────────────────────────────────────
 
 def compute_active_table(contracts_df: pd.DataFrame) -> list[dict]:
-    """Retorna lista de contratos ativos com dados para exibição na tabela."""
     if contracts_df.empty:
         return []
 
     hoje   = pd.Timestamp.now()
     cutoff = hoje - pd.Timedelta(days=CUTOFF_ATIVO_DIAS)
     OK     = {'Completo', 'Aprovado'}
-    contrato_keys = ['email_norm', 'produto', 'mes_inicio']
+    C_KEYS = ['email_norm', 'produto', 'mes_inicio']
 
-    plano_map = (contracts_df
-                 .groupby(contrato_keys)['parcela_num']
-                 .max()
-                 .reset_index()
-                 .rename(columns={'parcela_num': 'plano'}))
-    plano_map = plano_map[plano_map['plano'] > 1]
-    df = contracts_df.merge(plano_map, on=contrato_keys, how='inner')
+    plano_df = (contracts_df.groupby(C_KEYS)['parcela_num'].max()
+                .reset_index().rename(columns={'parcela_num': 'max_obs'}))
+    plano_df = plano_df[plano_df['max_obs'] > 1]
+    df = contracts_df.merge(plano_df, on=C_KEYS)
 
     result = []
-    for (email, produto, mes_inicio), grp in df.groupby(contrato_keys):
-        plano = int(grp['plano'].iloc[0])
-        pagas = grp[grp['status'].isin(OK)].sort_values('parcela_num')
+    for (email, produto, mes_inicio), grp in df.groupby(C_KEYS):
+        max_obs = int(grp['max_obs'].iloc[0])
+        pagas   = grp[grp['status'].isin(OK)].sort_values('parcela_num')
         if pagas.empty:
             continue
-        ultimo_pag = pagas['data'].max()
-        if ultimo_pag < cutoff:
+        ultimo  = pagas['data'].max()
+        if ultimo < cutoff:
             continue
         current = int(pagas['parcela_num'].max())
+        plano   = _infer_plano_final(max(max_obs, current))
         if current >= plano:
             continue
 
-        nome = str(grp['nome'].iloc[-1]) if 'nome' in grp.columns else ''
+        turma    = str(grp['turma'].iloc[0]) if 'turma' in grp.columns else '—'
+        nome_raw = grp['nome'].iloc[-1]
+        nome     = ' '.join(w.capitalize() for w in nome_raw.split()) if nome_raw else email
         restantes = plano - current
-        proxima_data = ultimo_pag + pd.Timedelta(days=30)
 
         result.append({
-            'nome':          ' '.join(w.capitalize() for w in nome.split()) if nome else email,
+            'nome':          nome,
             'email':         email,
             'produto':       produto,
-            'mes_inicio':    mes_inicio,
+            'turma':         turma,
             'plano':         f'{plano}x',
             'parcela_atual': current,
             'restantes':     restantes,
-            'proxima':       proxima_data.strftime('%d/%m/%Y'),
+            'proxima':       (ultimo + pd.Timedelta(days=30)).strftime('%d/%m/%Y'),
         })
 
     result.sort(key=lambda x: x['restantes'], reverse=True)
     return result[:200]
 
 
+# ── Cards ─────────────────────────────────────────────────────────────────────
+
 def _compute_cards(contracts_df: pd.DataFrame, projection: dict) -> dict:
-    """Calcula os 3 cards de resumo."""
     if contracts_df.empty:
         return {'contratos_ativos': 0, 'parcelas_30d': 0, 'receita_6m': projection['total']}
 
-    hoje   = pd.Timestamp.now()
-    cutoff = hoje - pd.Timedelta(days=CUTOFF_ATIVO_DIAS)
-    OK     = {'Completo', 'Aprovado'}
-    contrato_keys = ['email_norm', 'produto', 'mes_inicio']
+    hoje      = pd.Timestamp.now()
+    cutoff    = hoje - pd.Timedelta(days=CUTOFF_ATIVO_DIAS)
+    limite30  = hoje + pd.Timedelta(days=30)
+    OK        = {'Completo', 'Aprovado'}
+    C_KEYS    = ['email_norm', 'produto', 'mes_inicio']
 
-    plano_map = (contracts_df.groupby(contrato_keys)['parcela_num'].max()
-                 .reset_index().rename(columns={'parcela_num': 'plano'}))
-    plano_map = plano_map[plano_map['plano'] > 1]
-    df = contracts_df.merge(plano_map, on=contrato_keys, how='inner')
+    plano_df = (contracts_df.groupby(C_KEYS)['parcela_num'].max()
+                .reset_index().rename(columns={'parcela_num': 'max_obs'}))
+    plano_df = plano_df[plano_df['max_obs'] > 1]
+    df = contracts_df.merge(plano_df, on=C_KEYS)
 
-    ativos = 0
-    parcelas_30d = 0
-    limite_30d = hoje + pd.Timedelta(days=30)
-
-    for _, grp in df.groupby(contrato_keys):
-        plano = int(grp['plano'].iloc[0])
-        pagas = grp[grp['status'].isin(OK)]
+    ativos = parcelas_30d = 0
+    for _, grp in df.groupby(C_KEYS):
+        max_obs = int(grp['max_obs'].iloc[0])
+        pagas   = grp[grp['status'].isin(OK)]
         if pagas.empty:
             continue
-        ultimo_pag = pagas['data'].max()
-        if ultimo_pag < cutoff:
+        ultimo  = pagas['data'].max()
+        if ultimo < cutoff:
             continue
         current = int(pagas['parcela_num'].max())
+        plano   = _infer_plano_final(max(max_obs, current))
         if current >= plano:
             continue
         ativos += 1
-        prox = ultimo_pag + pd.Timedelta(days=30)
-        if prox <= limite_30d:
+        if ultimo + pd.Timedelta(days=30) <= limite30:
             parcelas_30d += 1
 
-    return {
-        'contratos_ativos': ativos,
-        'parcelas_30d':     parcelas_30d,
-        'receita_6m':       projection['total'],
-    }
+    return {'contratos_ativos': ativos, 'parcelas_30d': parcelas_30d,
+            'receita_6m': projection['total']}
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def invalidate_cache():
     _cache.clear()
@@ -350,18 +343,21 @@ def get_parcelamentos() -> dict:
     if not rows:
         return {'sucesso': False, 'erro': 'Sem dados de parcelamentos'}
 
-    df_raw     = _to_df(rows)
-    contracts  = _build_contracts(df_raw)
+    df_raw    = _to_df(rows)
+    contracts = _build_contracts(df_raw)
 
-    retention   = compute_retention(contracts)
-    projection  = compute_projection(contracts)
-    table       = compute_active_table(contracts)
-    cards       = _compute_cards(contracts, projection)
+    if contracts.empty:
+        return {'sucesso': False, 'erro': 'Nenhum contrato parcelado identificado'}
+
+    retention  = compute_retention(contracts)
+    projection = compute_projection(contracts)
+    table      = compute_active_table(contracts)
+    cards      = _compute_cards(contracts, projection)
 
     result = {
         'sucesso':    True,
         'cards':      cards,
-        'retention':  retention,
+        'retention':  retention,   # {geral, por_turma, turmas}
         'projection': projection,
         'tabela':     table,
     }

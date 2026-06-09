@@ -456,7 +456,12 @@
             </div>
 
             <div class="chart-container">
-                <h3>Curva de Retenção por Tipo de Plano</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                    <h3 style="margin:0">Curva de Retenção por Tipo de Plano</h3>
+                    <select id="filtroTurmaParcel" class="modern-select" style="font-size:0.85rem;padding:0.4rem 0.75rem">
+                        <option value="geral">Todas as turmas</option>
+                    </select>
+                </div>
                 <canvas id="retencaoParcelChart"></canvas>
             </div>
 

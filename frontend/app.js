@@ -522,26 +522,21 @@ function renderInadimplencia(data) {
 }
 
 // ── Parcelamentos ─────────────────────────────────────────────────────────────
-function renderParcelamentos(data) {
-    // Cards
-    document.getElementById('valContratosAtivos').innerText = data.cards.contratos_ativos ?? 0;
-    document.getElementById('valParcelas30d').innerText     = data.cards.parcelas_30d ?? 0;
-    document.getElementById('valReceita6m').innerText       = formatCurrency(data.cards.receita_6m ?? 0);
+let _parcelData = null;  // cache local para re-render do gráfico de retenção
 
+function _renderRetencaoChart(retencaoData) {
     const cc = chartColors();
-
-    // Gráfico 1 — Retenção por plano (linhas)
-    const ctxRet = document.getElementById('retencaoParcelChart').getContext('2d');
+    const ctx = document.getElementById('retencaoParcelChart').getContext('2d');
     if (retencaoParcelChart) retencaoParcelChart.destroy();
 
-    const paleta = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899'];
-    const planos  = Object.keys(data.retention || {});
-    const maxPos  = planos.length > 0 ? Math.max(...planos.map(p => data.retention[p].plano)) : 12;
+    const paleta  = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899'];
+    const planos  = Object.keys(retencaoData || {});
+    const maxPos  = planos.length > 0 ? Math.max(...planos.map(p => retencaoData[p].plano)) : 12;
     const labels  = Array.from({length: maxPos}, (_, i) => `Parcela ${i + 1}`);
 
     const datasets = planos.map((plano, idx) => {
-        const info  = data.retention[plano];
-        const vals  = Array.from({length: maxPos}, (_, i) => {
+        const info = retencaoData[plano];
+        const vals = Array.from({length: maxPos}, (_, i) => {
             const pos = i + 1;
             return pos <= info.plano ? (info.curva[pos] ?? null) : null;
         });
@@ -556,7 +551,7 @@ function renderParcelamentos(data) {
         };
     });
 
-    retencaoParcelChart = new Chart(ctxRet, {
+    retencaoParcelChart = new Chart(ctx, {
         type: 'line',
         data: { labels, datasets },
         options: {
@@ -571,8 +566,37 @@ function renderParcelamentos(data) {
             plugins: { legend: { labels: { color: cc.text } } }
         }
     });
+}
+
+function renderParcelamentos(data) {
+    _parcelData = data;
+
+    // Cards
+    document.getElementById('valContratosAtivos').innerText = data.cards.contratos_ativos ?? 0;
+    document.getElementById('valParcelas30d').innerText     = data.cards.parcelas_30d ?? 0;
+    document.getElementById('valReceita6m').innerText       = formatCurrency(data.cards.receita_6m ?? 0);
+
+    // Popular filtro de turma
+    const sel = document.getElementById('filtroTurmaParcel');
+    sel.innerHTML = '<option value="geral">Todas as turmas</option>';
+    (data.retention.turmas || []).forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+    });
+    sel.onchange = () => {
+        const turma = sel.value;
+        const ret   = turma === 'geral'
+            ? _parcelData.retention.geral
+            : (_parcelData.retention.por_turma[turma] || {});
+        _renderRetencaoChart(ret);
+    };
+
+    // Gráfico 1 — Retenção (inicia com geral)
+    _renderRetencaoChart(data.retention.geral || {});
 
     // Gráfico 2 — Projeção mensal (barras)
+    const cc      = chartColors();
     const ctxProj = document.getElementById('projecaoParcelChart').getContext('2d');
     if (projecaoParcelChart) projecaoParcelChart.destroy();
 
