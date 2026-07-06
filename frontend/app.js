@@ -162,6 +162,10 @@ fileInput.addEventListener('change', async (e) => {
         const data = await res.json();
         if(data.sucesso) {
             showLoading('Atualizando métricas');
+            // Resetar flags para forçar recarga das abas lazy na próxima visita
+            projecoesLoaded     = false;
+            clientesLoaded      = false;
+            parcelamentosLoaded = false;
             await loadAllData();
         } else {
             alert('Erro: ' + data.erro);
