@@ -366,16 +366,18 @@ def get_dashboard_geral(start_date=None, end_date=None, benchmark='mom'):
         for cod, nome in vendedores.items():
             mask = df_atual_all_aprov['Origem de Checkout'].astype(str).str.contains(cod, case=False, na=False)
             df_vend_aprov = df_atual_all_aprov[mask]
-            vendido = df_vend_aprov['Faturamento_Liquido'].sum()
+
+            # Só vendas novas (Rec=1 ou nula) — recorrências pagas não são vendas do vendedor
+            df_vend_vendas = df_vend_aprov[
+                (df_vend_aprov['Recorrência'].isna()) | (df_vend_aprov['Recorrência'] == 1)
+            ]
+            vendido = df_vend_vendas['Faturamento_Liquido'].sum()
 
             mask_atr = df_atual_all_atras['Origem de Checkout'].astype(str).str.contains(cod, case=False, na=False)
             atrasado = df_atual_all_atras[mask_atr]['Faturamento_Liquido'].sum()
 
             taxa_inad = (atrasado / (vendido + atrasado)) * 100 if (vendido + atrasado) > 0 else 0
 
-            df_vend_vendas = df_vend_aprov[
-                (df_vend_aprov['Recorrência'].isna()) | (df_vend_aprov['Recorrência'] == 1)
-            ]
             volume_vendas = len(df_vend_vendas)
             qtd_itens = int(
                 df_vend_vendas['Quantidade de itens'].fillna(0).astype(float).sum()
